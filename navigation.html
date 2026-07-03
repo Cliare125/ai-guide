@@ -18,11 +18,11 @@
     overflow: hidden;
   }
 
-  /* ===== 地图区域 ===== */
+  /* ===== 地图区域（黄金比例 38.2% : 61.8%） ===== */
   #mapSection {
     position: relative;
-    width: 100%; height: 55vh;
-    min-height: 280px; max-height: 450px;
+    width: 100%; height: 38vh;
+    min-height: 200px; max-height: 340px;
     flex-shrink: 0;
     overflow: hidden;
     background: #1a1a2e;
@@ -116,7 +116,7 @@
     align-items: center; gap: 4px; transition: all 0.2s;
   }
   .back-btn:active { background: rgba(97,88,255,0.3); }
-  .nav-title { font-size: 15px; font-weight: 600; }
+  .nav-title { font-size: 16px; font-weight: 600; }
   .nav-modes { display: flex; gap: 6px; }
   .mode-btn {
     padding: 4px 12px; border-radius: 12px;
@@ -176,7 +176,7 @@
     padding: 12px 16px; border-radius: 18px 18px 18px 4px;
     background: rgba(97,88,255,0.10);
     border: 1px solid rgba(97,88,255,0.18);
-    color: rgba(255,255,255,0.93); font-size: 14px;
+    color: rgba(255,255,255,0.93); font-size: 15px;
     line-height: 1.7; word-break: break-word;
     white-space: pre-wrap; animation: msgIn 0.3s ease;
   }
@@ -184,7 +184,7 @@
     align-self: flex-end; max-width: 80%;
     padding: 10px 14px; border-radius: 18px 18px 4px 18px;
     background: linear-gradient(135deg, #6158ff, #7c6fff);
-    color: #fff; font-size: 14px;
+    color: #fff; font-size: 15px;
     line-height: 1.65; word-break: break-word;
     white-space: pre-wrap; animation: msgIn 0.3s ease;
   }
@@ -224,7 +224,7 @@
     background: rgba(97,88,255,0.12);
     border: 1px solid rgba(97,88,247,0.2);
     color: rgba(255,255,255,0.7);
-    font-size: 12px; cursor: pointer;
+    font-size: 13px; cursor: pointer;
     white-space: nowrap; transition: all 0.2s;
   }
   .quick-chip:active { background: rgba(97,88,255,0.4); color: #fff; }
@@ -335,6 +335,22 @@
     display: none; position: fixed; top: 0; left: 0; right: 0;
     z-index: 999; background: #ff4444; color: #fff;
     padding: 10px 14px; font-size: 13px; text-align: center; line-height: 1.5;
+  }
+
+  /* ===== 手机端适配：黄金比例 + 大字 ===== */
+  @media (max-width: 480px) {
+    #mapSection {
+      height: 35vh;
+      min-height: 180px;
+      max-height: 300px;
+    }
+    .msg-ai, .msg-user { font-size: 16px; }
+    .quick-chip { font-size: 13px; padding: 8px 14px; }
+    .nav-title { font-size: 15px; }
+    .map-control { width: 46px; height: 46px; font-size: 20px; }
+    #searchBar { height: 42px; }
+    #searchInput { font-size: 16px; }
+    #voiceBtn.voice-pill { height: 42px; font-size: 15px; }
   }
 </style>
 </head>
@@ -989,15 +1005,38 @@ function _startVoiceWebkit() {
     }
     voiceRecog.onerror = (e) => {
       const code = e && e.error || ''
-      if (code === 'not-allowed' || code === 'service-not-allowed') {
-        showToast('浏览器语音权限不可用，切换到本地识别…'); stopVoice({ cancel: true }); _startVoiceServer(); return
+      if (code === 'not-allowed' || code === 'service-not-allowed' || code === 'network') {
+        showToast('正在切换到本地识别…')
+        _stopWebkitSilent()
+        _startVoiceServer()
+        return
       }
-      if (code === 'network') { showToast('浏览器语音需联网，切换到本地识别…'); stopVoice({ cancel: true }); _startVoiceServer(); return }
-      showToast('语音识别出错：' + code); stopVoice({ cancel: true })
+      if (code === 'no-speech') {
+        showToast('没听到声音，请再试一次')
+      } else if (code === 'aborted') {
+        // 正常停止，不提示
+      } else {
+        showToast('语音识别出错：' + code + '，正在切换本地识别…')
+        _stopWebkitSilent()
+        _startVoiceServer()
+      }
     }
     voiceRecog.onend = () => { if (isListening) stopVoice({ cancel: voiceCanceled }) }
     voiceRecog.start()
-  } catch (e) { showToast('启动语音失败：' + e.message); stopVoice({ cancel: true }) }
+  } catch (e) {
+    showToast('启动语音识别失败，正在切换本地识别…')
+    _startVoiceServer()
+  }
+}
+
+// 静默停止 webkit（不弹"已取消发送"，不清空文本）
+function _stopWebkitSilent() {
+  if (voiceRecog) {
+    try { voiceRecog.stop() } catch(e) {}
+    voiceRecog = null
+  }
+  isListening = false
+  setVoiceBtnState('off')
 }
 async function _startVoiceServer() {
   try {
@@ -1076,19 +1115,11 @@ function stopVoice(opts) {
 
 function bindVoiceButton(btn) {
   if (!btn) return
-  let pressTimer = null
   let activePointerId = null
   const CANCEL_DISTANCE = 60
 
-  function _onDown(e) {
-    if (activePointerId !== null) return
-    activePointerId = e.pointerId
-    voiceStartX = e.clientX
-    voiceStartY = e.clientY
-    voiceCanceled = false
-    btn.setPointerCapture && btn.setPointerCapture(e.pointerId)
-    pressTimer = setTimeout(() => { startVoice() }, 200)
-  }
+  btn.addEventListener('contextmenu', e => e.preventDefault())
+
   function _onMove(e) {
     if (activePointerId !== e.pointerId || !isListening) return
     const dx = e.clientX - voiceStartX, dy = e.clientY - voiceStartY
@@ -1098,10 +1129,7 @@ function bindVoiceButton(btn) {
   }
   function _onUp(e) {
     if (activePointerId !== e.pointerId) return
-    if (pressTimer) { clearTimeout(pressTimer); pressTimer = null }
-    btn.classList.remove('will-cancel', 'will-send', 'snap-back')
-    btn.releasePointerCapture && btn.releasePointerCapture(e.pointerId)
-    activePointerId = null
+    _cleanup()
     if (isListening) {
       btn.classList.add('snap-back')
       setTimeout(() => btn.classList.remove('snap-back'), 100)
@@ -1109,16 +1137,30 @@ function bindVoiceButton(btn) {
     }
   }
   function _onCancel(e) {
-    if (pressTimer) { clearTimeout(pressTimer); pressTimer = null }
+    _cleanup()
+    if (isListening) stopVoice({ cancel: voiceCanceled })
+  }
+  function _cleanup() {
     btn.classList.remove('will-cancel', 'will-send', 'snap-back')
+    document.removeEventListener('pointermove', _onMove)
+    document.removeEventListener('pointerup', _onUp)
+    document.removeEventListener('pointercancel', _onCancel)
     activePointerId = null
-    if (isListening) stopVoice({ cancel: true })
   }
 
-  btn.addEventListener('pointerdown', _onDown)
-  btn.addEventListener('pointermove', _onMove)
-  btn.addEventListener('pointerup', _onUp)
-  btn.addEventListener('pointercancel', _onCancel)
+  btn.addEventListener('pointerdown', function(e) {
+    if (activePointerId !== null) return
+    e.preventDefault()
+    activePointerId = e.pointerId
+    voiceStartX = e.clientX
+    voiceStartY = e.clientY
+    voiceCanceled = false
+    document.addEventListener('pointermove', _onMove)
+    document.addEventListener('pointerup', _onUp)
+    document.addEventListener('pointercancel', _onCancel)
+    startVoice()
+  })
+
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && isListening) stopVoice({ cancel: true }) })
 }
 function bindAllVoiceButtons() {
