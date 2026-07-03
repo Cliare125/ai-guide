@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+*.pyo
+test_audio.wav
+*.bat
+*.vbs
+部署说明.txt
+cf.exe
+cloudflared.exe
+.workbuddy/

@@ -1,0 +1,14 @@
+services:
+  - type: web
+    name: ai-guide-assistant
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: python server.py
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.13.2"
+      - key: HF_ENDPOINT
+        value: "https://hf-mirror.com"
+      - key: HF_HUB_DISABLE_XET
+        value: "1"

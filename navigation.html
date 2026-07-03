@@ -1,0 +1,1480 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<title>随行导览 - 导航</title>
+<!-- Leaflet CSS + JS (免费开源地图引擎) -->
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; touch-action: manipulation; }
+  html, body {
+    width: 100%; height: 100%;
+    background: #0a0a18;
+    font-family: -apple-system, 'PingFang SC', 'Microsoft YaHei', sans-serif;
+    color: #fff;
+    display: flex; flex-direction: column;
+    overflow: hidden;
+  }
+
+  /* ===== 地图区域 ===== */
+  #mapSection {
+    position: relative;
+    width: 100%; height: 55vh;
+    min-height: 280px; max-height: 450px;
+    flex-shrink: 0;
+    overflow: hidden;
+    background: #1a1a2e;
+  }
+  #mapContainer { width: 100%; height: 100%; }
+
+  /* 地图加载遮罩 */
+  #mapLoading {
+    position: absolute; inset: 0;
+    background: linear-gradient(135deg, #1a1a2e, #0f0f2a);
+    display: flex; align-items: center; justify-content: center;
+    flex-direction: column; gap: 12px;
+    z-index: 1000; color: rgba(255,255,255,0.6); font-size: 13px;
+    transition: opacity 0.4s;
+  }
+  #mapLoading.hide { opacity: 0; pointer-events: none; }
+  .map-spinner {
+    width: 32px; height: 32px; border: 3px solid rgba(97,88,255,0.2);
+    border-top-color: #6158ff; border-radius: 50%;
+    animation: mapSpin 0.8s linear infinite;
+  }
+  @keyframes mapSpin { to { transform: rotate(360deg); } }
+
+  /* 地图控件 */
+  .map-control {
+    position: absolute; z-index: 5;
+    background: rgba(10,10,24,0.85); backdrop-filter: blur(8px);
+    border: 1px solid rgba(97,88,255,0.25);
+    border-radius: 22px;
+    color: #fff; cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.3);
+    transition: all 0.2s; width: 44px; height: 44px; font-size: 18px;
+  }
+  .map-control:active { background: rgba(97,88,255,0.5); transform: scale(0.94); }
+  #btnLocate { right: 10px; bottom: 10px; }
+  #btnZoomIn { right: 10px; bottom: 110px; font-size: 20px; }
+  #btnZoomOut { right: 10px; bottom: 60px; font-size: 20px; }
+
+  /* 搜索框 */
+  #searchBar {
+    position: absolute; top: 10px; left: 10px; right: 70px; z-index: 5;
+    background: rgba(10,10,24,0.9); backdrop-filter: blur(10px);
+    border: 1px solid rgba(97,88,255,0.25);
+    border-radius: 22px; padding: 0 12px 0 14px;
+    display: flex; align-items: center;
+    height: 40px;
+  }
+  #searchInput {
+    flex: 1; background: transparent; border: none; outline: none;
+    color: #fff; font-size: 14px; font-family: inherit;
+    -webkit-appearance: none;
+  }
+  #searchInput::placeholder { color: rgba(255,255,255,0.35); }
+  #searchClear {
+    background: transparent; border: none; color: rgba(255,255,255,0.4);
+    font-size: 18px; cursor: pointer; padding: 0 4px; display: none;
+  }
+  #searchClear.show { display: block; }
+
+  #searchResults {
+    position: absolute; top: 56px; left: 10px; right: 10px; z-index: 6;
+    background: rgba(10,10,24,0.96); backdrop-filter: blur(10px);
+    border: 1px solid rgba(97,88,255,0.2);
+    border-radius: 12px; max-height: 220px; overflow-y: auto;
+    display: none;
+  }
+  #searchResults.show { display: block; }
+  .search-item {
+    padding: 11px 14px; border-bottom: 1px solid rgba(255,255,255,0.05);
+    cursor: pointer; font-size: 13px; color: rgba(255,255,255,0.85);
+  }
+  .search-item:last-child { border-bottom: none; }
+  .search-item:active { background: rgba(97,88,255,0.25); }
+  .search-item .si-name { font-weight: 600; }
+  .search-item .si-addr { font-size: 11px; color: rgba(255,255,255,0.4); margin-top: 2px; }
+
+  /* 顶部栏 */
+  #topBar {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 8px 16px;
+    background: rgba(10,10,24,0.95);
+    border-bottom: 1px solid rgba(97,88,255,0.15);
+    flex-shrink: 0;
+  }
+  .back-btn {
+    padding: 6px 14px; border-radius: 14px;
+    background: rgba(255,255,255,0.08); border: none;
+    color: #fff; font-size: 14px; cursor: pointer;
+    text-decoration: none; display: inline-flex;
+    align-items: center; gap: 4px; transition: all 0.2s;
+  }
+  .back-btn:active { background: rgba(97,88,255,0.3); }
+  .nav-title { font-size: 15px; font-weight: 600; }
+  .nav-modes { display: flex; gap: 6px; }
+  .mode-btn {
+    padding: 4px 12px; border-radius: 12px;
+    background: rgba(97,88,255,0.15); border: 1px solid rgba(97,88,255,0.25);
+    color: #fff; font-size: 12px; cursor: pointer; transition: all 0.2s;
+  }
+  .mode-btn.active { background: rgba(97,88,255,0.6); border-color: rgba(97,88,255,0.8); }
+  .mode-btn:active { background: rgba(97,88,255,0.5); }
+
+  /* 导航信息卡 */
+  #navCard {
+    background: linear-gradient(135deg, rgba(97,88,255,0.18), rgba(168,85,247,0.12));
+    backdrop-filter: blur(10px);
+    border: 1px solid rgba(97,88,255,0.3);
+    border-radius: 14px; padding: 12px; margin: 8px 16px;
+    flex-shrink: 0; display: none;
+  }
+  #navCard.show { display: block; }
+  .nav-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+  .nav-dest { font-size: 14px; font-weight: 600; flex: 1; }
+  .nav-cancel { background: rgba(255,80,80,0.2); border: 1px solid rgba(255,80,80,0.3); color: #ff8a8a; font-size: 11px; padding: 3px 10px; border-radius: 10px; cursor: pointer; }
+  .nav-stats { display: flex; gap: 10px; }
+  .stat-item { flex: 1; text-align: center; padding: 7px 4px; background: rgba(255,255,255,0.06); border-radius: 8px; }
+  .stat-value { font-size: 17px; font-weight: 700; color: #fff; }
+  .stat-value small { font-size: 11px; color: rgba(255,255,255,0.5); font-weight: 400; }
+  .stat-label { font-size: 10px; color: rgba(255,255,255,0.5); margin-top: 2px; }
+
+  /* 步行步骤 */
+  #navSteps {
+    margin-top: 8px; max-height: 90px; overflow-y: auto;
+    background: rgba(0,0,0,0.2); border-radius: 8px; padding: 6px 10px;
+    display: none;
+  }
+  #navSteps.show { display: block; }
+  #navSteps::-webkit-scrollbar { width: 3px; }
+  #navSteps::-webkit-scrollbar-thumb { background: rgba(97,88,255,0.3); border-radius: 2px; }
+  .step-item { font-size: 12px; color: rgba(255,255,255,0.85); padding: 4px 0; border-bottom: 1px solid rgba(255,255,255,0.05); line-height: 1.5; }
+  .step-item:last-child { border-bottom: none; }
+  .step-idx { color: #6158ff; font-weight: 700; margin-right: 4px; }
+
+  /* ===== 聊天区域 ===== */
+  #chatArea {
+    flex: 1; overflow-y: auto;
+    padding: 12px 16px 4px;
+    display: flex; flex-direction: column; gap: 10px;
+    -webkit-overflow-scrolling: touch;
+    scroll-behavior: smooth;
+    min-height: 0;
+  }
+  #chatArea::-webkit-scrollbar { width: 3px; }
+  #chatArea::-webkit-scrollbar-track { background: transparent; }
+  #chatArea::-webkit-scrollbar-thumb { background: rgba(97,88,255,0.2); border-radius: 2px; }
+
+  @keyframes msgIn { from{opacity:0;transform:translateY(10px) scale(0.97)} to{opacity:1;transform:translateY(0) scale(1)} }
+  .msg-ai {
+    align-self: flex-start; max-width: 88%;
+    padding: 12px 16px; border-radius: 18px 18px 18px 4px;
+    background: rgba(97,88,255,0.10);
+    border: 1px solid rgba(97,88,255,0.18);
+    color: rgba(255,255,255,0.93); font-size: 14px;
+    line-height: 1.7; word-break: break-word;
+    white-space: pre-wrap; animation: msgIn 0.3s ease;
+  }
+  .msg-user {
+    align-self: flex-end; max-width: 80%;
+    padding: 10px 14px; border-radius: 18px 18px 4px 18px;
+    background: linear-gradient(135deg, #6158ff, #7c6fff);
+    color: #fff; font-size: 14px;
+    line-height: 1.65; word-break: break-word;
+    white-space: pre-wrap; animation: msgIn 0.3s ease;
+  }
+  .typing-ind {
+    align-self: flex-start; padding: 14px 18px;
+    background: rgba(97,88,255,0.10);
+    border: 1px solid rgba(97,88,255,0.18);
+    border-radius: 18px 18px 18px 4px;
+    display: flex; gap: 5px; animation: msgIn 0.3s ease;
+  }
+  .typing-ind span {
+    width: 7px; height: 7px; border-radius: 50%;
+    background: rgba(97,88,255,0.6);
+    animation: typingDot 1.4s ease-in-out infinite;
+  }
+  .typing-ind span:nth-child(2) { animation-delay: 0.2s; }
+  .typing-ind span:nth-child(3) { animation-delay: 0.4s; }
+  @keyframes typingDot { 0%,60%,100%{transform:translateY(0);opacity:0.3} 30%{transform:translateY(-6px);opacity:1} }
+  .stream-cursor {
+    display: inline-block; width: 2px; height: 14px;
+    background: rgba(97,88,255,0.9); border-radius: 1px;
+    animation: cursorBlink 0.7s ease-in-out infinite;
+    vertical-align: text-bottom; margin-left: 2px;
+  }
+  @keyframes cursorBlink { 0%,100%{opacity:1} 50%{opacity:0} }
+
+  /* 快捷操作 */
+  #quickActions {
+    display: flex; gap: 8px; padding: 4px 16px;
+    overflow-x: auto; flex-shrink: 0;
+    -webkit-overflow-scrolling: touch;
+  }
+  #quickActions::-webkit-scrollbar { display: none; }
+  .quick-chip {
+    flex-shrink: 0; padding: 7px 14px;
+    border-radius: 16px;
+    background: rgba(97,88,255,0.12);
+    border: 1px solid rgba(97,88,247,0.2);
+    color: rgba(255,255,255,0.7);
+    font-size: 12px; cursor: pointer;
+    white-space: nowrap; transition: all 0.2s;
+  }
+  .quick-chip:active { background: rgba(97,88,255,0.4); color: #fff; }
+
+  /* 输入栏 */
+  #inputBar {
+    display: flex; gap: 8px; align-items: center;
+    padding: 10px 12px calc(14px + env(safe-area-inset-bottom, 0px));
+    background: rgba(10,10,24,0.95);
+    border-top: 1px solid rgba(255,255,255,0.06);
+    flex-shrink: 0;
+  }
+  #voiceBtn {
+    width: 38px; height: 38px; border-radius: 50%;
+    background: rgba(255,255,255,0.08);
+    border: none; color: #fff; font-size: 16px;
+    cursor: pointer; display: flex;
+    align-items: center; justify-content: center;
+    flex-shrink: 0; transition: all 0.2s;
+  }
+  #voiceBtn.listening { background: rgba(255,80,80,0.6); animation: voicePulse 1s infinite; }
+  @keyframes voicePulse { 0%,100%{box-shadow:0 0 0 0 rgba(255,80,80,0.4)} 50%{box-shadow:0 0 0 6px rgba(255,80,80,0)} }
+
+  /* 语音长条按钮（常驻·松开直接发送） */
+  #voiceBtn.voice-pill {
+    flex: 1; min-width: 0;
+    height: 38px; border-radius: 22px;
+    background: rgba(255,255,255,0.10);
+    border: none; color: #fff; font-size: 14px;
+    display: flex; align-items: center; justify-content: center;
+    gap: 8px; padding: 0 16px;
+    cursor: pointer; user-select: none;
+    -webkit-user-select: none;
+    transition: background 0.15s, transform 0.1s;
+    touch-action: none;
+    position: relative;
+    overflow: hidden;
+  }
+  #voiceBtn.voice-pill .voice-icon { font-size: 16px; flex-shrink: 0; transition: transform 0.1s; }
+  #voiceBtn.voice-pill .voice-text { flex: 1; min-width: 0; text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #voiceBtn.voice-pill .voice-text:empty { display: none; }
+  #voiceBtn.voice-pill.has-text .voice-label { display: none; }
+  #voiceBtn.voice-pill .voice-label { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 1; text-align: left; }
+
+  /* 录音中：变红 + 脉动 */
+  #voiceBtn.voice-pill.listening { background: rgba(255,80,80,0.75); color: #fff; animation: voicePulse 1.2s infinite; }
+  #voiceBtn.voice-pill.will-send { background: rgba(76,175,80,0.8); }
+  #voiceBtn.voice-pill.will-cancel { background: rgba(255,152,0,0.85); color: #fff; }
+  #voiceBtn.voice-pill.will-cancel .voice-icon { transform: translateX(-3px) scale(1.1); }
+  #voiceBtn.voice-pill.will-cancel .voice-label::after { content: '·松开取消'; opacity: 0.9; margin-left: 4px; }
+  #voiceBtn.voice-pill.snap-back { transform: scale(0.96); }
+
+  /* 输入模式：常驻同时显示 */
+  #inputBar #inputWrap { transition: max-width 0.25s, opacity 0.2s, margin 0.2s; max-width: 0; opacity: 0; overflow: hidden; margin: 0; padding: 0; border: none; }
+  #inputBar.text-mode #inputWrap { max-width: 100%; opacity: 1; }
+  #inputBar.voice-mode #inputWrap { max-width: 0; opacity: 0; }
+  #inputBar.text-mode #voiceBtn.voice-pill { width: 38px; flex: 0 0 38px; height: 38px; border-radius: 50%; padding: 0; }
+  #inputBar.text-mode #voiceBtn.voice-pill .voice-label,
+  #inputBar.text-mode #voiceBtn.voice-pill .voice-text { display: none !important; }
+  #inputBar.voice-mode #sendBtn,
+  #inputBar.voice-mode #keyboardBtn { display: none; }
+  #inputBar.text-mode #sendBtn,
+  #inputBar.text-mode #keyboardBtn { display: flex; }
+
+  #inputWrap {
+    flex: 1; background: rgba(255,255,255,0.06);
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 22px; padding: 0 14px;
+    display: flex; align-items: center;
+    transition: border-color 0.2s;
+  }
+  #inputWrap:focus-within { border-color: rgba(97,88,255,0.5); }
+  #chatInput {
+    flex: 1; height: 38px; background: transparent;
+    border: none; color: #fff; font-size: 14px;
+    outline: none; font-family: inherit;
+    -webkit-appearance: none;
+  }
+  #chatInput::placeholder { color: rgba(255,255,255,0.25); }
+  #sendBtn {
+    width: 38px; height: 38px; border-radius: 50%;
+    background: linear-gradient(135deg, #6158ff, #a855f7);
+    border: none; color: #fff; font-size: 16px;
+    cursor: pointer; display: flex;
+    align-items: center; justify-content: center;
+    flex-shrink: 0; transition: all 0.2s;
+    box-shadow: 0 2px 12px rgba(97,88,255,0.3);
+  }
+  #sendBtn:active { transform: scale(0.92); }
+  #sendBtn:disabled { opacity: 0.35; cursor: not-allowed; }
+
+  /* Toast */
+  #toast {
+    position: fixed; bottom: calc(70px + env(safe-area-inset-bottom, 0px)); left: 50%;
+    transform: translateX(-50%) translateY(10px);
+    background: rgba(30,30,50,0.92); color: #fff;
+    padding: 8px 20px; border-radius: 22px;
+    font-size: 13px; z-index: 200;
+    pointer-events: none; opacity: 0;
+    transition: opacity 0.3s, transform 0.3s;
+    white-space: nowrap; backdrop-filter: blur(6px);
+    border: 1px solid rgba(97,88,255,0.3);
+  }
+  #toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+  /* 连接状态栏 */
+  #connBar {
+    display: none; position: fixed; top: 0; left: 0; right: 0;
+    z-index: 999; background: #ff4444; color: #fff;
+    padding: 10px 14px; font-size: 13px; text-align: center; line-height: 1.5;
+  }
+</style>
+</head>
+<body>
+
+<!-- 地图区域 -->
+<div id="mapSection">
+  <div id="mapContainer"></div>
+
+  <!-- 加载遮罩 -->
+  <div id="mapLoading">
+    <div class="map-spinner"></div>
+    <div id="mapLoadingText">正在加载地图...</div>
+  </div>
+
+  <!-- 搜索框 -->
+  <div id="searchBar">
+    <span style="color:rgba(255,255,255,0.4);margin-right:6px;">🔍</span>
+    <input type="text" id="searchInput" placeholder="搜索目的地（如：天安门、故宫）" autocomplete="off">
+    <button id="searchClear" onclick="clearSearch()">✕</button>
+  </div>
+  <div id="searchResults"></div>
+
+  <!-- 地图控件 -->
+  <button class="map-control" id="btnZoomIn" onclick="mapZoomIn()">+</button>
+  <button class="map-control" id="btnZoomOut" onclick="mapZoomOut()">−</button>
+  <button class="map-control" id="btnLocate" onclick="locateMe()" title="回到我的位置">📍</button>
+</div>
+
+<!-- 顶部栏 -->
+<div id="topBar">
+  <a class="back-btn" href="index.html">‹ 识别</a>
+  <div class="nav-title">🗺 导航</div>
+  <div class="nav-modes">
+    <button class="mode-btn active" data-mode="walk">步行</button>
+    <button class="mode-btn" data-mode="drive">驾车</button>
+    <button class="mode-btn" data-mode="ride">骑行</button>
+  </div>
+</div>
+
+<!-- 导航信息卡 -->
+<div id="navCard">
+  <div class="nav-head">
+    <div class="nav-dest" id="navDest">→ 目的地</div>
+    <button class="nav-cancel" onclick="cancelRoute()">结束</button>
+  </div>
+  <div class="nav-stats">
+    <div class="stat-item">
+      <div class="stat-value" id="statDist">--</div>
+      <div class="stat-label">总距离</div>
+    </div>
+    <div class="stat-item">
+      <div class="stat-value" id="statTime">--</div>
+      <div class="stat-label">预计用时</div>
+    </div>
+    <div class="stat-item">
+      <div class="stat-value" id="statSteps">--</div>
+      <div class="stat-label">步骤</div>
+    </div>
+  </div>
+  <div id="navSteps"></div>
+</div>
+
+<!-- 聊天区域 -->
+<div id="chatArea"></div>
+
+<!-- 快捷操作 -->
+<div id="quickActions">
+  <div class="quick-chip" onclick="sendQuick('请帮我规划一条包含故宫、天安门、景山公园的步行游览路线')">🗺 规划路线</div>
+  <div class="quick-chip" onclick="sendQuick('请介绍附近热门景点')">🏛 景点解说</div>
+  <div class="quick-chip" onclick="sendQuick('附近有什么好吃的餐厅推荐')">🍜 餐饮推荐</div>
+  <div class="quick-chip" onclick="askNav('天安门')">📍 去天安门</div>
+  <div class="quick-chip" onclick="askNav('故宫博物院')">📍 去故宫</div>
+</div>
+
+<!-- 输入栏 -->
+<div id="inputBar" class="voice-mode">
+  <button id="ttsBtn" onclick="toggleTTS()" title="语音播报：AI回复后自动念出来" class="bar-btn active">🔊</button>
+
+  <!-- 语音长条（常驻·默认显示·识别中显示文字；松开直接发送·拉出框外撤回） -->
+  <button id="voiceBtn" class="voice-pill" title="按住说话·松开发送；拉出框外可撤回">
+    <span class="voice-icon">🎙</span>
+    <span class="voice-text"></span>
+    <span class="voice-label">按住说话</span>
+  </button>
+
+  <!-- 文字输入模式（按 ⌨️ 键切出来） -->
+  <div id="inputWrap">
+    <input type="text" id="chatInput" placeholder="问路线、景点、美食...（按 ⌨️ 切到打字）" maxlength="500" autocomplete="off">
+  </div>
+
+  <button id="sendBtn" onclick="handleSend()">➤</button>
+
+  <!-- ⌨️ 切换键（仅文字模式显示·也可按 ⌨️ 键） -->
+  <button class="bar-btn" id="keyboardBtn" title="切换到语音条模式">⌨️</button>
+</div>
+
+<!-- 隐藏的 file input：拖入 / 粘贴 / 拍照触发 -->
+<input type="file" id="mediaFileInput" accept="image/*,video/*" capture="environment" style="display:none">
+
+<!-- 连接状态栏 -->
+<div id="connBar">
+  ⚠️ AI 服务未连接 — 请双击 <b>start-server.bat</b> 启动代理服务器，然后通过 <b>http://localhost:9876</b> 访问本页面。
+</div>
+
+<!-- Toast -->
+<div id="toast"></div>
+
+<script>
+// ========= 配置 =========
+const COZE_BOT_ID  = '7634912525821214766'
+const COZE_PAT     = 'pat_QS0OXlmgaTdW9X1GJSpHZ0zLgJTsr9LIL7IR0ZejsZjQHVEuDM0O2deX9ppekSu2'
+const COZE_API     = '/coze-api'
+const AMAP_KEY     = '335c1e1e04d42ff2268d6bf8f0d7c629'  // 高德 Web 服务 key（唯一可用）
+const AMAP_PROXY   = '/amap-api'                          // 高德 REST API 代理
+const USER_ID      = 'web_user_nav_' + Math.random().toString(36).substr(2, 9)
+
+let conversationId = null
+let isSending = false
+let isListening = false
+let serverOnline = false
+let voiceStopFn = null
+
+// ========= 服务器健康检查 =========
+async function checkServer() {
+  // 探活：访问 /health（server.py 静态 GET），100% 不会失败除非服务器真没起
+  try {
+    const r = await fetch('/health', { method: 'GET', signal: AbortSignal.timeout(3000), cache: 'no-store' })
+    if (!r.ok) throw new Error('not ok')
+    serverOnline = true
+    const bar = document.getElementById('connBar')
+    if (bar) bar.style.display = 'none'
+    return true
+  } catch (e) {
+    // 探活失败不立即显示红框（手机/远程访问 /health 可能被中间盒改写）
+    // 只在 API 真正失败时才显示（见 handleApiError）
+    serverOnline = false
+    return false
+  }
+}
+setInterval(checkServer, 30000)
+
+// ========= 地图全局 =========
+let map = null          // Leaflet 地图实例
+let userMarker = null   // 用户位置标记
+let userPos = null      // {lat, lng} 当前定位
+let currentLocation = null  // {lat, lng, address} 当前位置（兼容其他来源）
+let destMarker = null   // 目的地标记
+let routeLine = null    // 路线折线
+let currentMode = 'walk' // 'walk' | 'drive' | 'ride'
+
+// ========= 位置上下文（发给 Coze 用） =========
+// 优先用 userPos（地图定位），其次 currentLocation（其他来源）
+function getLocationContext() {
+  const loc = userPos || currentLocation
+  if (!loc) return ''
+  const { lat, lng } = loc
+  const addr = (loc.address || '').toString()
+  return `\n\n[系统提示：用户当前所在位置（用于导览/路线规划，请基于此规划）]\n📍 当前坐标: ${lng.toFixed(6)}, ${lat.toFixed(6)}${addr ? '\n📮 当前位置: ' + addr : ''}\n[提示结束]`
+}
+
+// ========= Toast =========
+function showToast(msg, duration = 2000) {
+  const t = document.getElementById('toast')
+  t.textContent = msg; t.classList.add('show')
+  clearTimeout(t._timer)
+  t._timer = setTimeout(() => t.classList.remove('show'), duration)
+}
+
+// ========= 地图初始化（Leaflet） =========
+function initMap() {
+  // 创建 Leaflet 地图
+  map = L.map('mapContainer', {
+    center: [39.90923, 116.397428],  // 默认北京天安门
+    zoom: 14,
+    zoomControl: false  // 我们用自定义按钮
+  })
+
+  // 使用高德瓦片图层（通过代理或直接）
+  // 高德瓦片URL格式：http://wprd0{1-4}.is.autonavi.com/appmaptile?x={x}&y={y}&z={z}&lang=zh_cn&size=1&scl=1&style=7
+  L.tileLayer('https://wprd01.is.autonavi.com/appmaptile?x={x}&y={y}&z={z}&lang=zh_cn&size=1&scl=1&style=7', {
+    maxZoom: 18,
+    attribution: '&copy; 高德地图'
+  }).addTo(map)
+
+  // 隐藏加载遮罩
+  setTimeout(() => {
+    const ld = document.getElementById('mapLoading')
+    ld.classList.add('hide')
+    setTimeout(() => ld.style.display = 'none', 500)
+  }, 600)
+
+  // 定位
+  locateMe()
+}
+
+// ========= 定位（浏览器原生 geolocation + 高德 IP 定位双保险） =========
+async function locateMe() {
+  if (!navigator.geolocation) {
+    await locateByIP()
+    return
+  }
+  showToast('正在定位...')
+  // 同时启动两个：浏览器 GPS + 高德 IP
+  const ipPromise = locateByIP().catch(() => null)  // IP 定位作为备份
+
+  navigator.geolocation.getCurrentPosition(
+    (pos) => {
+      userPos = { lat: pos.coords.latitude, lng: pos.coords.longitude }
+      currentLocation = { lat: userPos.lat, lng: userPos.lng, address: '浏览器 GPS 定位', source: 'gps' }
+      setUserMarker()
+      map.setView([userPos.lat, userPos.lng], 16)
+      showToast('已定位到当前位置 ✅')
+    },
+    async (err) => {
+      console.warn('浏览器定位失败:', err)
+      // 浏览器定位失败，使用 IP 定位
+      const ok = await ipPromise
+      if (!ok) {
+        // IP 定位也失败，弹窗让用户选城市
+        showToast('定位失败，请搜索城市')
+        userPos = { lat: 39.90923, lng: 116.397428 }  // 默认北京
+        setUserMarker()
+      }
+    },
+    { enableHighAccuracy: true, timeout: 8000, maximumAge: 60000 }
+  )
+}
+
+// 高德 IP 定位 — 通过用户公网 IP 判断大致位置（不需要授权）
+// 注意：本地访问 (127.0.0.1) 拿不到位置；用户从手机/外网访问时工作
+async function locateByIP() {
+  try {
+    const data = await amapApi('/v3/ip')
+    if (data.status === '1' && data.rectangle && data.rectangle.length > 0) {
+      // rectangle 格式 "lng1,lng2;lat1,lat2" — 取中心点
+      const [lngRange, latRange] = data.rectangle.split(';')
+      const [lng1, lng2] = lngRange.split(',').map(Number)
+      const [lat1, lat2] = latRange.split(',').map(Number)
+      userPos = { lat: (lat1 + lat2) / 2, lng: (lng1 + lng2) / 2 }
+      currentLocation = { lat: userPos.lat, lng: userPos.lng, address: data.city || data.province || '' }
+      setUserMarker()
+      if (data.city) {
+        showToast(`已定位到 ${data.city} 📍`)
+      } else {
+        showToast('已通过 IP 定位 📍')
+      }
+      return true
+    } else {
+      console.warn('IP 定位返回失败（key 可能没开 IP 定位权限）:', data)
+      return false
+    }
+  } catch (e) {
+    console.warn('IP 定位请求失败:', e)
+    return false
+  }
+}
+
+// ========= 让用户手动选择城市（定位失败的备选） =========
+async function locateByCityName(cityName) {
+  // 调用高德地理编码 API：城市名 → 经纬度
+  try {
+    const data = await amapApi('/v3/geocode/geo?address=' + encodeURIComponent(cityName))
+    if (data.status === '1' && data.geocodes && data.geocodes.length > 0) {
+      const loc = data.geocodes[0].location  // "lng,lat"
+      const [lng, lat] = loc.split(',').map(Number)
+      userPos = { lat, lng }
+      currentLocation = { lat, lng, address: cityName }
+      setUserMarker()
+      map.setView([lat, lng], 12)
+      return true
+    }
+  } catch (e) {
+    console.warn('城市定位失败:', e)
+  }
+  return false
+}
+
+function setUserMarker() {
+  if (userMarker) map.removeLayer(userMarker)
+  // 蓝色圆点表示当前位置
+  userMarker = L.circleMarker([userPos.lat, userPos.lng], {
+    radius: 8,
+    fillColor: '#4488ff',
+    color: '#fff',
+    weight: 2,
+    opacity: 1,
+    fillOpacity: 0.9
+  }).addTo(map)
+  userMarker.bindTooltip('📍 我的位置', { permanent: false, direction: 'top' })
+}
+
+// ========= 地图操作 =========
+function mapZoomIn()  { if (map) map.zoomIn() }
+function mapZoomOut() { if (map) map.zoomOut() }
+
+// ========= 高德 REST API 调用 =========
+async function amapApi(path) {
+  // 通过代理服务器调用高德 REST API，自动带上 key
+  const url = AMAP_PROXY + path + (path.indexOf('?') === -1 ? '?' : '&') + 'key=' + AMAP_KEY
+  const resp = await fetch(url)
+  if (!resp.ok) throw new Error('AMAP_API_ERROR_' + resp.status)
+  return await resp.json()
+}
+
+// ========= 搜索（高德 REST API - 输入提示） =========
+let searchTimer = null
+document.getElementById('searchInput').addEventListener('input', (e) => {
+  const v = e.target.value.trim()
+  document.getElementById('searchClear').classList.toggle('show', !!v)
+  clearTimeout(searchTimer)
+  if (!v) { hideSearchResults(); return }
+  searchTimer = setTimeout(() => doSearch(v), 300)
+})
+document.getElementById('searchInput').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') { e.preventDefault(); const v = e.target.value.trim(); if (v) doSearch(v) }
+})
+
+function clearSearch() {
+  document.getElementById('searchInput').value = ''
+  document.getElementById('searchClear').classList.remove('show')
+  hideSearchResults()
+}
+
+async function doSearch(keyword) {
+  try {
+    // 高德输入提示API
+    const data = await amapApi('/v3/assistant/inputtips?keywords=' + encodeURIComponent(keyword) + '&type=&citylimit=false')
+    const list = document.getElementById('searchResults')
+    if (!data.tips || !data.tips.length) {
+      list.innerHTML = '<div class="search-item" style="color:rgba(255,255,255,0.4);text-align:center;">未找到相关地点</div>'
+      list.classList.add('show')
+      return
+    }
+    // 过滤掉没有location的
+    const tips = data.tips.filter(t => t.location && t.location.length > 0)
+    if (!tips.length) {
+      list.innerHTML = '<div class="search-item" style="color:rgba(255,255,255,0.4);text-align:center;">未找到相关地点</div>'
+      list.classList.add('show')
+      return
+    }
+    list.innerHTML = tips.map(t => `
+      <div class="search-item" data-name="${escapeAttr(t.name)}" data-loc="${t.location}" data-addr="${escapeAttr(t.address || t.district || '')}">
+        <div class="si-name">${escapeHtml(t.name)}</div>
+        <div class="si-addr">${escapeHtml(t.address || t.district || '')}</div>
+      </div>
+    `).join('')
+    list.classList.add('show')
+    list.querySelectorAll('.search-item').forEach(el => {
+      el.addEventListener('click', () => {
+        const locStr = el.dataset.loc  // "lng,lat" 格式
+        const parts = locStr.split(',')
+        const lng = parseFloat(parts[0])
+        const lat = parseFloat(parts[1])
+        const name = el.dataset.name
+        const addr = el.dataset.addr
+        selectDestination(name, addr, lat, lng)
+      })
+    })
+  } catch (err) {
+    console.error('搜索失败:', err)
+    showToast('搜索失败，请检查网络')
+  }
+}
+
+function hideSearchResults() { document.getElementById('searchResults').classList.remove('show') }
+
+// ========= 选目的地 + 路线规划 =========
+function selectDestination(name, address, lat, lng) {
+  clearSearch()
+  hideSearchResults()
+  setDestMarker(name, lat, lng)
+  planRoute(name, lat, lng)
+}
+
+function setDestMarker(name, lat, lng) {
+  if (destMarker) map.removeLayer(destMarker)
+  // 红色目的地标记
+  const redIcon = L.divIcon({
+    className: '',
+    html: '<div style="width:24px;height:24px;background:#ff5577;border:2px solid #fff;border-radius:50%;box-shadow:0 2px 6px rgba(0,0,0,0.4);display:flex;align-items:center;justify-content:center;font-size:12px;color:#fff;">📍</div>',
+    iconSize: [24, 24],
+    iconAnchor: [12, 12]
+  })
+  destMarker = L.marker([lat, lng], { icon: redIcon, title: name }).addTo(map)
+  destMarker.bindTooltip(name, { permanent: false, direction: 'top' })
+}
+
+function clearRoute() {
+  if (routeLine) { map.removeLayer(routeLine); routeLine = null }
+  document.getElementById('navCard').classList.remove('show')
+  document.getElementById('navSteps').classList.remove('show')
+}
+
+async function planRoute(name, destLat, destLng) {
+  if (!userPos) { showToast('尚未获取到当前位置，请稍候'); return }
+
+  clearRoute()
+  setDestMarker(name, destLat, destLng)
+
+  // 显示导航卡
+  document.getElementById('navCard').classList.add('show')
+  document.getElementById('navDest').textContent = '→ ' + name
+  document.getElementById('statDist').textContent = '计算中...'
+  document.getElementById('statTime').textContent = '--'
+  document.getElementById('statSteps').textContent = '--'
+  document.getElementById('navSteps').classList.remove('show')
+
+  const origin = userPos.lng + ',' + userPos.lat
+  const destination = destLng + ',' + destLat
+  const modeName = currentMode === 'walk' ? '步行' : (currentMode === 'drive' ? '驾车' : '骑行')
+
+  let apiPath
+  if (currentMode === 'walk') {
+    apiPath = '/v3/direction/walking?origin=' + origin + '&destination=' + destination
+  } else if (currentMode === 'drive') {
+    apiPath = '/v3/direction/driving?origin=' + origin + '&destination=' + destination + '&strategy=0'
+  } else {
+    apiPath = '/v4/direction/bicycling?origin=' + origin + '&destination=' + destination
+  }
+
+  try {
+    const data = await amapApi(apiPath)
+
+    // 解析路线数据
+    let route = null
+    if (currentMode === 'walk' && data.route && data.route.paths && data.route.paths[0]) {
+      route = data.route.paths[0]
+    } else if (currentMode === 'drive' && data.route && data.route.paths && data.route.paths[0]) {
+      route = data.route.paths[0]
+    } else if (currentMode === 'ride' && data.data && data.data.paths && data.data.paths[0]) {
+      route = data.data.paths[0]
+    }
+
+    if (!route) {
+      showToast('未找到可行路线')
+      document.getElementById('statDist').textContent = '规划失败'
+      return
+    }
+
+    const distKm = (route.distance / 1000).toFixed(2)
+    const timeMin = Math.max(1, Math.round(route.duration / 60))
+    document.getElementById('statDist').textContent = distKm + ' km'
+    document.getElementById('statTime').textContent = timeMin + ' 分'
+
+    // 解析路径点绘制折线
+    const pathPoints = parseRoutePath(route)
+    if (pathPoints && pathPoints.length) {
+      const color = currentMode === 'walk' ? '#5af' : (currentMode === 'drive' ? '#a855f7' : '#ff9')
+      routeLine = L.polyline(pathPoints, {
+        color: color,
+        weight: 6,
+        opacity: 0.85,
+        lineJoin: 'round',
+        lineCap: 'round'
+      }).addTo(map)
+
+      // 自适应视野
+      map.fitBounds(routeLine.getBounds(), { padding: [40, 40] })
+    }
+
+    // 步骤详情
+    const steps = route.steps || []
+    document.getElementById('statSteps').textContent = steps.length + ' 步'
+    if (steps.length) {
+      const html = steps.slice(0, 8).map((s, i) => {
+        const instr = s.instruction || s.road || ''
+        const sd = s.distance ? Math.round(s.distance) : 0
+        return `<div class="step-item"><span class="step-idx">${i+1}.</span>${escapeHtml(instr)}${sd ? ' <span style="color:rgba(255,255,255,0.4);">('+sd+'m)</span>' : ''}</div>`
+      }).join('')
+      document.getElementById('navSteps').innerHTML = html
+      document.getElementById('navSteps').classList.add('show')
+    }
+
+    showToast(modeName + '路线已规划 ✅')
+  } catch (err) {
+    console.error('路线规划失败:', err)
+    showToast('路线规划失败，请重试')
+    document.getElementById('statDist').textContent = '失败'
+  }
+}
+
+function parseRoutePath(route) {
+  // 高德 REST API 返回的 polyline 是 "lng,lat;lng,lat;..." 格式
+  const allPoints = []
+  const steps = route.steps || []
+  steps.forEach(s => {
+    if (s.polyline) {
+      const pairs = s.polyline.split(';')
+      pairs.forEach(pair => {
+        const parts = pair.split(',')
+        if (parts.length === 2) {
+          const lng = parseFloat(parts[0])
+          const lat = parseFloat(parts[1])
+          if (!isNaN(lng) && !isNaN(lat)) {
+            allPoints.push([lat, lng])  // Leaflet 用 [lat, lng] 格式
+          }
+        }
+      })
+    }
+  })
+  return allPoints
+}
+
+function cancelRoute() {
+  clearRoute()
+  if (destMarker) { map.removeLayer(destMarker); destMarker = null }
+  showToast('已结束导航')
+}
+
+// ========= 模式切换 =========
+document.querySelectorAll('.mode-btn').forEach(btn => {
+  btn.addEventListener('click', (e) => {
+    document.querySelectorAll('.mode-btn').forEach(b => b.classList.remove('active'))
+    e.target.classList.add('active')
+    currentMode = e.target.dataset.mode
+    showToast('已切换到' + (currentMode==='walk'?'步行':currentMode==='drive'?'驾车':'骑行'))
+    if (destMarker && userPos) {
+      const pos = destMarker.getLatLng()
+      planRoute(destMarker.options.title || '目的地', pos.lat, pos.lng)
+    }
+  })
+})
+
+// ========= 聊天 UI =========
+function addMessage(text, isUser) {
+  const area = document.getElementById('chatArea')
+  const div = document.createElement('div')
+  div.className = isUser ? 'msg-user' : 'msg-ai'
+  div.textContent = text
+  area.appendChild(div); scrollToBottom()
+  return div
+}
+function addTyping() {
+  const div = document.createElement('div')
+  div.className = 'typing-ind'; div.id = 'typingInd'
+  div.innerHTML = '<span></span><span></span><span></span>'
+  document.getElementById('chatArea').appendChild(div); scrollToBottom()
+}
+function removeTyping() { const t = document.getElementById('typingInd'); if (t) t.remove() }
+function scrollToBottom() { document.getElementById('chatArea').scrollTop = document.getElementById('chatArea').scrollHeight }
+
+function escapeHtml(s) {
+  return (s||'').toString().replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c])
+}
+function escapeAttr(s) {
+  return (s||'').toString().replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c])
+}
+
+// ========= 快捷操作 =========
+function sendQuick(text) { addMessage(text, true); sendToCoze(text) }
+async function askNav(placeName) {
+  const text = '我想步行去' + placeName
+  addMessage(text, true)
+  // 用高德地理编码找目的地
+  try {
+    const data = await amapApi('/v3/geocode/geo?address=' + encodeURIComponent(placeName))
+    if (data.geocodes && data.geocodes.length) {
+      const geo = data.geocodes[0]
+      const loc = geo.location.split(',')
+      const lng = parseFloat(loc[0])
+      const lat = parseFloat(loc[1])
+      selectDestination(geo.formatted_address || placeName, geo.formatted_address || '', lat, lng)
+      addMessage('📍 已规划到「' + (geo.formatted_address || placeName) + '」的步行路线，请查看地图。', false)
+    } else {
+      sendToCoze(text)
+    }
+  } catch (err) {
+    sendToCoze(text)
+  }
+}
+
+// ========= 文字发送 =========
+function handleSend() {
+  const input = document.getElementById('chatInput')
+  const text = input.value.trim()
+  if (!text || isSending) return
+  input.value = ''
+  voiceBaseText = ''; voiceInterimShown = ''
+  _updateVoiceDisplay('')
+  addMessage(text, true); sendToCoze(text)
+}
+document.getElementById('chatInput').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend() }
+})
+
+// ========= 语音输入（按住说话·松开直接发送·拉出框外撤回） =========
+let voiceRecog = null
+let voiceBaseText = ''
+let voiceInterimShown = ''
+let mediaRecorder = null
+let mediaChunks = []
+let mediaStream = null
+let voiceStartX = 0, voiceStartY = 0
+let voiceCanceled = false
+
+function getInput() { return document.getElementById('chatInput') }
+function getInputText() { const inp = getInput(); return inp ? inp.value : '' }
+function setInputText(t) { const inp = getInput(); if (!inp) return; inp.value = t; try { inp.setSelectionRange(inp.value.length, inp.value.length) } catch(e){} }
+
+function _updateVoiceDisplay(combinedText) {
+  const txt = (combinedText || '').trim()
+  const pill = document.getElementById('voiceBtn')
+  if (pill) {
+    const textEl = pill.querySelector('.voice-text')
+    if (textEl) textEl.textContent = txt
+    pill.classList.toggle('has-text', !!txt)
+  }
+  const inp = getInput()
+  if (inp && inp.value !== txt) {
+    inp.value = txt
+    try { inp.setSelectionRange(inp.value.length, inp.value.length) } catch(e) {}
+  }
+}
+function setVoiceBtnState(state) {
+  const pill = document.getElementById('voiceBtn'); if (pill) pill.classList.toggle('listening', state === 'on')
+}
+function _pickMime() {
+  const mimes = ['audio/webm;codecs=opus', 'audio/webm', 'audio/ogg;codecs=opus', 'audio/mp4']
+  for (const m of mimes) if (window.MediaRecorder && MediaRecorder.isTypeSupported(m)) return m
+  return ''
+}
+function startVoice() {
+  if (isListening) return
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition
+  if (SR) _startVoiceWebkit()
+  else if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) _startVoiceServer()
+  else showToast('当前浏览器不支持语音输入，请用 Edge/Chrome 桌面版或手动输入')
+}
+function _startVoiceWebkit() {
+  try {
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition
+    voiceRecog = new SR()
+    voiceRecog.lang = 'zh-CN'
+    voiceRecog.interimResults = true
+    voiceRecog.continuous = false
+    voiceBaseText = getInputText()
+    voiceInterimShown = ''
+    voiceCanceled = false
+    isListening = true
+    setVoiceBtnState('on')
+    voiceRecog.onresult = (e) => {
+      let interim = '', finalText = ''
+      for (let i = e.resultIndex; i < e.results.length; i++) {
+        const tr = e.results[i][0].transcript
+        if (e.results[i].isFinal) finalText += tr
+        else interim += tr
+      }
+      if (finalText) voiceBaseText = (voiceBaseText ? voiceBaseText + ' ' : '') + finalText.trim()
+      voiceInterimShown = interim
+      _updateVoiceDisplay((voiceBaseText + (voiceInterimShown ? ' ' + voiceInterimShown : '')).trim())
+    }
+    voiceRecog.onerror = (e) => {
+      const code = e && e.error || ''
+      if (code === 'not-allowed' || code === 'service-not-allowed') {
+        showToast('浏览器语音权限不可用，切换到本地识别…'); stopVoice({ cancel: true }); _startVoiceServer(); return
+      }
+      if (code === 'network') { showToast('浏览器语音需联网，切换到本地识别…'); stopVoice({ cancel: true }); _startVoiceServer(); return }
+      showToast('语音识别出错：' + code); stopVoice({ cancel: true })
+    }
+    voiceRecog.onend = () => { if (isListening) stopVoice({ cancel: voiceCanceled }) }
+    voiceRecog.start()
+  } catch (e) { showToast('启动语音失败：' + e.message); stopVoice({ cancel: true }) }
+}
+async function _startVoiceServer() {
+  try {
+    mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true })
+    mediaChunks = []
+    mediaRecorder = new MediaRecorder(mediaStream, { mimeType: _pickMime() })
+    mediaRecorder.ondataavailable = (e) => { if (e.data && e.data.size) mediaChunks.push(e.data) }
+    mediaRecorder.onstop = async () => {
+      const blob = new Blob(mediaChunks, { type: mediaRecorder.mimeType || 'audio/webm' })
+      mediaChunks = []
+      if (mediaStream) { try { mediaStream.getTracks().forEach(t => t.stop()) } catch(e){}; mediaStream = null }
+      if (voiceCanceled) {
+        voiceBaseText = ''; voiceInterimShown = ''; _updateVoiceDisplay('')
+        isListening = false; setVoiceBtnState('off'); showToast('已取消发送'); return
+      }
+      _updateVoiceDisplay((voiceBaseText ? voiceBaseText + ' ' : '') + '（正在识别…）')
+      try {
+        const fd = new FormData()
+        fd.append('audio', blob, 'voice.' + (blob.type.split('/')[1] || 'webm'))
+        const r = await fetch('/stt', { method: 'POST', body: fd })
+        const j = await r.json()
+        if (j && j.text) {
+          voiceBaseText = (voiceBaseText ? voiceBaseText + ' ' : '') + j.text.trim()
+          _updateVoiceDisplay(voiceBaseText.trim())
+          _sendVoiceResult(voiceBaseText.trim())
+        } else if (j && j.error) {
+          showToast('本地识别失败：' + (j.detail || j.error))
+          isListening = false; setVoiceBtnState('off')
+        }
+      } catch (err) {
+        showToast('上传识别失败：' + err.message)
+        isListening = false; setVoiceBtnState('off')
+      }
+    }
+    mediaRecorder.start()
+    voiceBaseText = getInputText()
+    voiceInterimShown = ''
+    voiceCanceled = false
+    isListening = true
+    setVoiceBtnState('on')
+  } catch (e) {
+    showToast('无法访问麦克风：' + e.message)
+    isListening = false; setVoiceBtnState('off')
+  }
+}
+
+// 识别完成直接发送
+function _sendVoiceResult(text) {
+  isListening = false
+  setVoiceBtnState('off')
+  if (!text) { showToast('没听清，请再说一次'); voiceBaseText=''; voiceInterimShown=''; _updateVoiceDisplay(''); return }
+  setInputText(text)
+  handleSend()
+  voiceBaseText = ''; voiceInterimShown = ''; _updateVoiceDisplay('')
+}
+
+// opts.cancel = true 表示拉出框外撤回
+function stopVoice(opts) {
+  opts = opts || {}
+  const cancel = !!opts.cancel
+  if (voiceRecog) { try { voiceRecog.stop() } catch(e){}; voiceRecog = null }
+  if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+    voiceCanceled = cancel
+    try { mediaRecorder.stop() } catch(e){}; return
+  }
+  isListening = false; setVoiceBtnState('off')
+  if (cancel) { voiceBaseText=''; voiceInterimShown=''; _updateVoiceDisplay(''); showToast('已取消发送'); return }
+  if (voiceInterimShown) {
+    voiceBaseText = (voiceBaseText ? voiceBaseText + ' ' : '') + voiceInterimShown.trim()
+    voiceInterimShown = ''
+  }
+  const finalText = voiceBaseText.trim()
+  voiceBaseText = ''
+  _sendVoiceResult(finalText)
+}
+
+function bindVoiceButton(btn) {
+  if (!btn) return
+  let pressTimer = null
+  let activePointerId = null
+  const CANCEL_DISTANCE = 60
+
+  function _onDown(e) {
+    if (activePointerId !== null) return
+    activePointerId = e.pointerId
+    voiceStartX = e.clientX
+    voiceStartY = e.clientY
+    voiceCanceled = false
+    btn.setPointerCapture && btn.setPointerCapture(e.pointerId)
+    pressTimer = setTimeout(() => { startVoice() }, 200)
+  }
+  function _onMove(e) {
+    if (activePointerId !== e.pointerId || !isListening) return
+    const dx = e.clientX - voiceStartX, dy = e.clientY - voiceStartY
+    const dist = Math.sqrt(dx*dx + dy*dy)
+    const shouldCancel = dist > CANCEL_DISTANCE
+    if (shouldCancel !== voiceCanceled) { voiceCanceled = shouldCancel; btn.classList.toggle('will-cancel', shouldCancel) }
+  }
+  function _onUp(e) {
+    if (activePointerId !== e.pointerId) return
+    if (pressTimer) { clearTimeout(pressTimer); pressTimer = null }
+    btn.classList.remove('will-cancel', 'will-send', 'snap-back')
+    btn.releasePointerCapture && btn.releasePointerCapture(e.pointerId)
+    activePointerId = null
+    if (isListening) {
+      btn.classList.add('snap-back')
+      setTimeout(() => btn.classList.remove('snap-back'), 100)
+      stopVoice({ cancel: voiceCanceled })
+    }
+  }
+  function _onCancel(e) {
+    if (pressTimer) { clearTimeout(pressTimer); pressTimer = null }
+    btn.classList.remove('will-cancel', 'will-send', 'snap-back')
+    activePointerId = null
+    if (isListening) stopVoice({ cancel: true })
+  }
+
+  btn.addEventListener('pointerdown', _onDown)
+  btn.addEventListener('pointermove', _onMove)
+  btn.addEventListener('pointerup', _onUp)
+  btn.addEventListener('pointercancel', _onCancel)
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && isListening) stopVoice({ cancel: true }) })
+}
+function bindAllVoiceButtons() {
+  bindVoiceButton(document.getElementById('voiceBtn'))
+}
+function toggleVoice() { if (isListening) stopVoice({ cancel: true }); else startVoice() }
+
+// ========= 输入模式切换（语音条 ↔ 输入框·通过 ⌨️ 按钮显式切换） =========
+let inputMode = 'voice'
+function setInputMode(mode) {
+  inputMode = mode
+  const bar = document.getElementById('inputBar')
+  if (!bar) return
+  bar.classList.toggle('voice-mode', mode === 'voice')
+  bar.classList.toggle('text-mode', mode === 'text')
+  if (mode === 'text') {
+    setTimeout(() => { const i = getInput(); if (i) i.focus() }, 50)
+  } else {
+    _updateVoiceDisplay(getInputText())
+  }
+}
+function bindInputModeSwitch() {
+  const kbd = document.getElementById('keyboardBtn')
+  if (kbd) kbd.addEventListener('click', () => setInputMode(inputMode === 'voice' ? 'text' : 'voice'))
+  document.addEventListener('keydown', (e) => {
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+      e.preventDefault(); setInputMode(inputMode === 'voice' ? 'text' : 'voice')
+    }
+  })
+  const inp = getInput()
+  if (inp) inp.addEventListener('input', () => { voiceBaseText = inp.value; _updateVoiceDisplay(inp.value) })
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && inputMode === 'text' && document.activeElement === inp) setInputMode('voice')
+  })
+}
+
+// ========= 上传媒体（拖入 / 粘贴 / 文件选择器，UI 上不暴露 ➕ 按钮） =========
+function fileToDataURL(file) {
+  return new Promise((resolve, reject) => {
+    const r = new FileReader()
+    r.onload = () => resolve(r.result)
+    r.onerror = reject
+    r.readAsDataURL(file)
+  })
+}
+async function uploadFileToCoze(dataUrl, filename, contentType) {
+  try {
+    showToast('正在上传文件…')
+    const blob = await (await fetch(dataUrl)).blob()
+    const form = new FormData()
+    form.append('file', blob, filename)
+    const r = await fetch('/coze-api/v1/files/upload', { method: 'POST', body: form })
+    const j = await r.json()
+    if (j && j.data && j.data.id) { showToast('上传成功'); return j.data.id }
+    showToast('上传失败：' + (j.msg || JSON.stringify(j).slice(0, 80)))
+    return null
+  } catch (e) { showToast('上传异常：' + e.message); return null }
+}
+function bindMediaUpload() {
+  const file = document.getElementById('mediaFileInput')
+  if (!file) return
+  file.addEventListener('change', async (e) => {
+    const f = e.target.files && e.target.files[0]
+    if (!f) return
+    if (f.type.startsWith('video/')) {
+      showToast('已选择视频：' + f.name)
+      addMessage('[视频] ' + f.name, true)
+      const dataUrl = await fileToDataURL(f)
+      const fileId = await uploadFileToCoze(dataUrl, f.name, f.type)
+      if (fileId) sendToCozeWithFile('请看看这段视频里有什么', fileId)
+    } else {
+      const dataUrl = await fileToDataURL(f)
+      addPhotoMessage(dataUrl)
+      const fileId = await uploadFileToCoze(dataUrl, f.name, f.type || 'image/jpeg')
+      if (fileId) sendToCozeWithImage('请看看这张图片', fileId)
+    }
+    file.value = ''
+  })
+  // 粘贴上传
+  document.addEventListener('paste', async (e) => {
+    const items = e.clipboardData && e.clipboardData.items
+    if (!items) return
+    for (const it of items) {
+      if (it.type && it.type.startsWith('image/')) {
+        const blob = it.getAsFile()
+        if (!blob) continue
+        e.preventDefault()
+        const dataUrl = await fileToDataURL(blob)
+        addPhotoMessage(dataUrl)
+        const fileId = await uploadFileToCoze(dataUrl, 'paste.png', blob.type || 'image/png')
+        if (fileId) sendToCozeWithImage('请看看这张图片', fileId)
+        return
+      }
+    }
+  })
+  // 拖拽上传
+  document.addEventListener('dragover', (e) => { e.preventDefault() })
+  document.addEventListener('drop', async (e) => {
+    e.preventDefault()
+    const f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0]
+    if (!f) return
+    if (f.type.startsWith('image/')) {
+      const dataUrl = await fileToDataURL(f)
+      addPhotoMessage(dataUrl)
+      const fileId = await uploadFileToCoze(dataUrl, f.name, f.type || 'image/jpeg')
+      if (fileId) sendToCozeWithImage('请看看这张图片', fileId)
+    } else if (f.type.startsWith('video/')) {
+      const dataUrl = await fileToDataURL(f)
+      const fileId = await uploadFileToCoze(dataUrl, f.name, f.type)
+      if (fileId) sendToCozeWithFile('请看看这段视频里有什么', fileId)
+    } else {
+      showToast('仅支持图片/视频')
+    }
+  })
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+  bindAllVoiceButtons()
+  bindInputModeSwitch()
+  bindMediaUpload()
+  setInputMode('voice')
+})
+
+// ========= 语音播报（Edge TTS 走 server.py 代理） =========
+let ttsEnabled = true
+let currentAudio = null
+
+// 清洗 Markdown / 代码符号，让 TTS 念得更自然
+function cleanTextForTTS(text) {
+  if (!text) return ''
+  let t = text
+  t = t.replace(/```[\s\S]*?```/g, ' 代码块已省略 ')
+  t = t.replace(/`([^`]+)`/g, '$1')
+  t = t.replace(/!\[[^\]]*\]\([^)]*\)/g, '图片')
+  t = t.replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')
+  t = t.replace(/^#{1,6}\s*/gm, '')
+  t = t.replace(/(\*\*|__)(.*?)\1/g, '$2')
+  t = t.replace(/(\*|_)(.*?)\1/g, '$2')
+  t = t.replace(/^\s*[-*+]\s+/gm, '')
+  t = t.replace(/^\s*\d+\.\s+/gm, '')
+  t = t.replace(/^\s*>\s*/gm, '')
+  t = t.replace(/^[\s]*(?:---|\*\*\*|___)[\s]*$/gm, '。')
+  t = t.replace(/\|/g, '，')
+  t = t.replace(/\s+/g, ' ').trim()
+  return t
+}
+
+async function speakText(text) {
+  if (!ttsEnabled || !text) return
+  const cleanText = cleanTextForTTS(text.replace(/<[^>]*>/g, ''))
+  if (!cleanText) return
+  if (currentAudio) { try { currentAudio.pause() } catch(e) {}; currentAudio = null }
+  try {
+    const resp = await fetch('/tts', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text: cleanText, voice: 'zh-CN-XiaoxiaoNeural' })
+    })
+    if (!resp.ok) return
+    const blob = await resp.blob()
+    const url = URL.createObjectURL(blob)
+    const audio = new Audio(url)
+    currentAudio = audio
+    audio.onended = () => { URL.revokeObjectURL(url); currentAudio = null }
+    await audio.play().catch(e => { URL.revokeObjectURL(url) })
+  } catch (e) { /* silent */ }
+}
+function stopSpeaking() { if (currentAudio) { try { currentAudio.pause() } catch(e) {}; currentAudio = null } if (window.speechSynthesis) window.speechSynthesis.cancel() }
+function toggleTTS() { ttsEnabled = !ttsEnabled; const btn = document.getElementById('ttsBtn'); btn.classList.toggle('active', ttsEnabled); btn.textContent = ttsEnabled ? '🔊' : '🔈'; if (!ttsEnabled) stopSpeaking() }
+
+// ========= Coze API（流式） — 修正版 =========
+async function sendToCoze(userText, opts) {
+  opts = opts || {}
+  if (isSending) return
+  // 不再预检：直接发请求
+  isSending = true; document.getElementById('sendBtn').disabled = true
+  if (!opts.silent) addTyping()
+
+  // 追加位置信息（自动从 userPos / currentLocation 拿）
+  const finalText = userText + getLocationContext()
+
+  const reqBody = {
+    bot_id: COZE_BOT_ID, user_id: USER_ID,
+    stream: true, auto_save_history: true,
+    additional_messages: [{ role:'user', content_type:'text', content: finalText }]
+  }
+  if (conversationId) reqBody.conversation_id = conversationId
+
+  try {
+    const resp = await fetch(COZE_API + '/v3/chat', {
+      method: 'POST',
+      headers: { 'Authorization':'Bearer '+COZE_PAT, 'Content-Type':'application/json' },
+      body: JSON.stringify(reqBody)
+    })
+    if (!resp.ok) { const errTxt = await resp.text().catch(()=> ''); throw new Error('HTTP_'+resp.status+':'+errTxt) }
+
+    if (!opts.silent) removeTyping()
+    const msgEl = document.createElement('div'); msgEl.className='msg-ai'
+    msgEl.innerHTML = '<span class="stream-text"></span><span class="stream-cursor"></span>'
+    document.getElementById('chatArea').appendChild(msgEl); scrollToBottom()
+    const streamTextEl = msgEl.querySelector('.stream-text')
+    let fullText = ''
+
+    const reader = resp.body.getReader(); const decoder = new TextDecoder(); let buffer = ''
+    while (true) {
+      const chunk = await reader.read(); if (chunk.done) break
+      buffer += decoder.decode(chunk.value, {stream:true}); buffer = buffer.replace(/\r\n/g,'\n')
+      const parts = buffer.split('\n\n'); buffer = parts.pop()
+      for (let i=0; i<parts.length; i++) {
+        const evtText = parts[i]; if (!evtText.trim()) continue
+        const lines = evtText.split('\n'); let eventType=''; let eventData=''
+        for (let j=0;j<lines.length;j++) {
+          const line=lines[j]
+          if(line.charAt(0)===':') continue
+          if(line.startsWith('event:')) eventType=line.slice(6).trim()
+          else if(line.startsWith('data:')) { let d=line.slice(5); if(d.charAt(0)===' ') d=d.slice(1); if(eventData) eventData+='\n'; eventData+=d }
+        }
+        if (!eventData) continue
+        let data; try { data=JSON.parse(eventData) } catch(e) { continue }
+        if (data.conversation_id && !conversationId) conversationId=data.conversation_id
+
+        // ★ 关键修正：delta 事件用 data.content（不是 delta_content）
+        // 注意：豆包 1.8 深度思考模型把回复放在 reasoning_content，content 一直是空
+        if (eventType==='conversation.message.delta') {
+          if(data.type==='answer') {
+            const delta = data.content || data.reasoning_content || ''
+            if(delta) { fullText += delta; streamTextEl.textContent=fullText; scrollToBottom() }
+          }
+        }
+        if (eventType==='conversation.message.completed') {
+          if(data.type==='answer' && (data.content || data.reasoning_content)) {
+            fullText = data.content || data.reasoning_content
+            streamTextEl.textContent=fullText
+            scrollToBottom()
+          }
+        }
+        if (eventType==='conversation.chat.completed') {
+          const displayText = cleanTextForTTS(fullText)
+          msgEl.textContent = displayText || '抱歉，AI 暂时无法回复，请重试。'
+          if (displayText) speakText(displayText)  // 🔊 自动播报 AI 回复（不念思考过程）
+          if (opts.postMsg) setTimeout(() => addMessage(opts.postMsg, false), 300)
+        }
+        if (eventType==='conversation.chat.failed') throw new Error('CHAT_FAILED')
+      }
+    }
+    // 如果没收到 completed 事件，手动完成
+    if (msgEl.querySelector('.stream-cursor')) {
+      const displayText = cleanTextForTTS(fullText)
+      msgEl.textContent = displayText || '抱歉，AI 暂时无法回复，请重试。'
+    }
+  } catch(err) {
+    removeTyping(); console.error('[Coze API] Error:',err)
+    let errMsg='⚠️ 连接失败，请检查网络。'
+    const msg=err.message||''
+    const curURL = window.location.origin
+    if(msg.indexOf('Failed to fetch')!==-1 || msg.indexOf('fetch')!==-1) {
+      const bar = document.getElementById('connBar')
+      if (bar) {
+        bar.innerHTML = '⚠️ AI 服务未连接 — 当前访问地址: <b>' + curURL + '</b> 无法连接到代理服务器。请确认：<br>1) 电脑已运行 <b>python server.py</b> 或 <b>start-server.bat</b>　2) 手机访问请用电脑的局域网 IP（不是 localhost）'
+        bar.style.display = 'block'
+      }
+      errMsg='⚠️ 无法连接 AI 服务（' + curURL + '）。\n请确认代理服务器已启动，且用正确的 IP 访问。'
+    }
+    else if(msg.indexOf('HTTP_401')!==-1) errMsg='⚠️ 认证失败，请检查 API 令牌。'
+    else if(msg.indexOf('HTTP_404')!==-1) errMsg='⚠️ 智能体未找到，请检查 bot_id。'
+    else if(msg.indexOf('CHAT_FAILED')!==-1) errMsg='⚠️ 对话处理失败，请重试。'
+    addMessage(errMsg,false)
+  } finally { isSending=false; document.getElementById('sendBtn').disabled=false }
+}
+
+// ========= Coze API（图片 + 文字 / 视频 + 文字） =========
+async function sendToCozeWithImage(userText, fileId) {
+  return _sendToCozeWithAttachment(userText, [{ type: 'image', file_id: fileId }])
+}
+async function sendToCozeWithFile(userText, fileId) {
+  return _sendToCozeWithAttachment(userText, [{ type: 'file', file_id: fileId }])
+}
+async function _sendToCozeWithAttachment(userText, attachments) {
+  if (isSending) return
+  isSending = true; document.getElementById('sendBtn').disabled = true
+  addTyping()
+  const finalText = userText + getLocationContext()
+  const messageContent = JSON.stringify([{ type: 'text', text: finalText }, ...attachments])
+  const reqBody = {
+    bot_id: COZE_BOT_ID, user_id: USER_ID, stream: true, auto_save_history: true,
+    additional_messages: [{ role: 'user', content_type: 'object_string', content: messageContent }]
+  }
+  if (conversationId) reqBody.conversation_id = conversationId
+  try {
+    const resp = await fetch(COZE_API + '/v3/chat', {
+      method: 'POST',
+      headers: { 'Authorization':'Bearer '+COZE_PAT, 'Content-Type':'application/json' },
+      body: JSON.stringify(reqBody)
+    })
+    if (!resp.ok) { const t = await resp.text().catch(()=> ''); throw new Error('HTTP_'+resp.status+':'+t) }
+    removeTyping()
+    const msgEl = document.createElement('div'); msgEl.className='msg-ai'
+    msgEl.innerHTML = '<span class="stream-text"></span><span class="stream-cursor"></span>'
+    document.getElementById('chatArea').appendChild(msgEl); scrollToBottom()
+    const streamTextEl = msgEl.querySelector('.stream-text')
+    let fullText = ''
+    const reader = resp.body.getReader(); const decoder = new TextDecoder(); let buffer = ''
+    while (true) {
+      const chunk = await reader.read(); if (chunk.done) break
+      buffer += decoder.decode(chunk.value, {stream:true}); buffer = buffer.replace(/\r\n/g,'\n')
+      const parts = buffer.split('\n\n'); buffer = parts.pop()
+      for (let i=0; i<parts.length; i++) {
+        const evtText = parts[i]; if (!evtText.trim()) continue
+        const lines = evtText.split('\n'); let eventType=''; let eventData=''
+        for (let j=0;j<lines.length;j++) {
+          const line=lines[j]
+          if(line.charAt(0)===':') continue
+          if(line.startsWith('event:')) eventType=line.slice(6).trim()
+          else if(line.startsWith('data:')) { let d=line.slice(5); if(d.charAt(0)===' ') d=d.slice(1); if(eventData) eventData+='\n'; eventData+=d }
+        }
+        if (!eventData) continue
+        let data; try { data=JSON.parse(eventData) } catch(e) { continue }
+        if (eventType==='conversation.message.delta') {
+          if (data.type==='answer') {
+            const delta = data.content || data.reasoning_content || ''
+            if (delta) { fullText += delta; streamTextEl.textContent=fullText; scrollToBottom() }
+          }
+        }
+        if (eventType==='conversation.message.completed' && data.type==='answer' && (data.content || data.reasoning_content)) {
+          fullText = data.content || data.reasoning_content
+          streamTextEl.textContent=fullText; scrollToBottom()
+        }
+        if (eventType==='conversation.chat.completed') {
+          const displayText = cleanTextForTTS(fullText)
+          msgEl.innerHTML = ''; msgEl.textContent = displayText || '抱歉，AI 暂时无法回复，请重试。'
+          if (displayText) speakText(displayText)
+        }
+      }
+    }
+    if (msgEl.querySelector('.stream-cursor')) {
+      msgEl.innerHTML = ''; msgEl.textContent = cleanTextForTTS(fullText) || '抱歉，AI 暂时无法回复，请重试。'
+    }
+  } catch(err) {
+    removeTyping(); console.error('[Coze]', err)
+    addMessage('⚠️ 上传/发送失败：' + (err.message || err), false)
+  } finally { isSending=false; document.getElementById('sendBtn').disabled=false }
+}
+
+// ========= 初始化 =========
+window.addEventListener('load', () => {
+  checkServer().then(ok => {
+    // Leaflet 不需要额外 key，直接初始化
+    initMap()
+    if (!ok) {
+      // 探活失败不打扰用户，只在聊天时再报错
+      addMessage('你好！我是导航 AI 助手 🗺\n\n如果 AI 不回复，请确认：\n1) 电脑已启动 start-server.bat\n2) 手机访问请用电脑的局域网 IP（不是 localhost）\n\n我可以帮你：\n🗺 规划步行/驾车/骑行路线\n🏛 景点解说\n🍜 餐饮推荐', false)
+    } else {
+      addMessage('你好！我是导航 AI 助手 🗺\n\n我可以帮你：\n🗺 规划步行/驾车/骑行路线\n🏛 景点解说\n🍜 餐饮推荐\n\n📍 点击地图右上角「定位」可回到我的位置\n🔍 顶部搜索框可搜索任意目的地', false)
+    }
+  })
+})
+</script>
+</body>
+</html>
