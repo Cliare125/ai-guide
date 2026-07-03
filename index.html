@@ -842,10 +842,16 @@ function setVoiceBtnState(state) {
   if (btn) btn.classList.toggle('listening', state === 'on')
 }
 
-// 直接用本地 whisper 识别（/stt 端点），跳过 webkit（国内不可用/手机秒报错）
+// 手机优先用浏览器内置语音识别（HTTPS下可用），桌面直接用 whisper
 function startVoice() {
   if (isListening) return
-  if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+  const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent)
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition
+  if (isMobile && SR) {
+    // 手机：先用浏览器自带语音识别（实时、快速、免费）
+    _startVoiceWebkit()
+  } else if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+    // 桌面：用本地 whisper 识别
     _startVoiceServer()
   } else {
     showToast('当前浏览器不支持语音输入，请用 Edge/Chrome 或手动输入')
@@ -853,6 +859,7 @@ function startVoice() {
 }
 
 function _startVoiceWebkit() {
+  let webkitSwitched = false  // 防止 onend 在切换到 server 后重复触发
   try {
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition
     voiceRecog = new SR()
@@ -880,21 +887,29 @@ function _startVoiceWebkit() {
       // 静默切换：不弹"已取消发送"，直接切到服务器识别
       if (code === 'not-allowed' || code === 'service-not-allowed' || code === 'network') {
         showToast('正在切换到本地识别…')
+        webkitSwitched = true
         _stopWebkitSilent()
         _startVoiceServer()
         return
       }
       if (code === 'no-speech') {
         showToast('没听到声音，请再试一次')
+        webkitSwitched = true
+        _stopWebkitSilent()
       } else if (code === 'aborted') {
         // 正常停止，不提示
       } else {
         showToast('语音识别出错：' + code + '，正在切换本地识别…')
+        webkitSwitched = true
         _stopWebkitSilent()
         _startVoiceServer()
       }
     }
-    voiceRecog.onend = () => { if (isListening) stopVoice({ cancel: voiceCanceled }) }
+    voiceRecog.onend = () => {
+      // 如果已切换到 server 或已正常停止，不再触发 stopVoice
+      if (webkitSwitched) { webkitSwitched = false; return }
+      if (isListening) stopVoice({ cancel: voiceCanceled })
+    }
     voiceRecog.start()
   } catch (e) {
     showToast('启动语音识别失败，正在切换本地识别…')

@@ -8,10 +8,13 @@ Coze API 代理服务器
 - 支持 Edge TTS 代理（POST /tts 文本 → 音频流）
 """
 
-# 国内环境：用 HuggingFace 镜像下载 whisper 模型
+# 国内本地环境：用 HuggingFace 镜像下载 whisper 模型
+# Railway（海外服务器）不用镜像，直接用 huggingface.co
 import os
-os.environ.setdefault('HF_ENDPOINT', 'https://hf-mirror.com')
-os.environ.setdefault('HF_HUB_DISABLE_XET', '1')
+_is_railway = bool(os.environ.get('RAILWAY_ENVIRONMENT') or os.environ.get('PORT', '').startswith('80'))
+if not _is_railway:
+    os.environ.setdefault('HF_ENDPOINT', 'https://hf-mirror.com')
+    os.environ.setdefault('HF_HUB_DISABLE_XET', '1')
 os.environ.setdefault('HF_HUB_DISABLE_SYMLINKS_WARNING', '1')
 
 import http.server

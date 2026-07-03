@@ -981,7 +981,11 @@ function _pickMime() {
 }
 function startVoice() {
   if (isListening) return
-  if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+  const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent)
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition
+  if (isMobile && SR) {
+    _startVoiceWebkit()
+  } else if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
     _startVoiceServer()
   } else {
     showToast('当前浏览器不支持语音输入，请用 Edge/Chrome 或手动输入')
@@ -989,6 +993,7 @@ function startVoice() {
 }
 }
 function _startVoiceWebkit() {
+  let webkitSwitched = false
   try {
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition
     voiceRecog = new SR()
@@ -1015,21 +1020,28 @@ function _startVoiceWebkit() {
       const code = e && e.error || ''
       if (code === 'not-allowed' || code === 'service-not-allowed' || code === 'network') {
         showToast('正在切换到本地识别…')
+        webkitSwitched = true
         _stopWebkitSilent()
         _startVoiceServer()
         return
       }
       if (code === 'no-speech') {
         showToast('没听到声音，请再试一次')
+        webkitSwitched = true
+        _stopWebkitSilent()
       } else if (code === 'aborted') {
-        // 正常停止，不提示
+        // 正常停止
       } else {
         showToast('语音识别出错：' + code + '，正在切换本地识别…')
+        webkitSwitched = true
         _stopWebkitSilent()
         _startVoiceServer()
       }
     }
-    voiceRecog.onend = () => { if (isListening) stopVoice({ cancel: voiceCanceled }) }
+    voiceRecog.onend = () => {
+      if (webkitSwitched) { webkitSwitched = false; return }
+      if (isListening) stopVoice({ cancel: voiceCanceled })
+    }
     voiceRecog.start()
   } catch (e) {
     showToast('启动语音识别失败，正在切换本地识别…')
