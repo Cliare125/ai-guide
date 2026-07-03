@@ -263,7 +263,7 @@
     cursor: pointer; user-select: none;
     -webkit-user-select: none;
     transition: background 0.15s, transform 0.1s;
-    touch-action: manipulation;
+    touch-action: none;
     position: relative;
     overflow: hidden;
   }
@@ -272,14 +272,15 @@
   #voiceBtn.voice-pill .voice-text:empty { display: none; }
   #voiceBtn.voice-pill.has-text .voice-label { display: none; }
   #voiceBtn.voice-pill .voice-label { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 1; text-align: left; }
-  #voiceBtn.voice-pill.listening .voice-label::before { content: '点击停止'; }
+  #voiceBtn.voice-pill.listening .voice-label::before { content: '松开发送'; }
   #voiceBtn.voice-pill.listening .voice-text { display: none !important; }
 
   /* 录音中：变红 + 脉动 */
   #voiceBtn.voice-pill.listening { background: rgba(255,80,80,0.75); color: #fff; animation: voicePulse 1.2s infinite; }
   #voiceBtn.voice-pill.will-send { background: rgba(76,175,80,0.8); }
   #voiceBtn.voice-pill.will-cancel { background: rgba(255,152,0,0.85); color: #fff; }
-  #voiceBtn.voice-pill.will-cancel { background: rgba(255,152,0,0.85); color: #fff; }
+  #voiceBtn.voice-pill.will-cancel .voice-icon { transform: translateX(-3px) scale(1.1); }
+  #voiceBtn.voice-pill.will-cancel .voice-label::after { content: '·松开取消'; opacity: 0.9; margin-left: 4px; }
   #voiceBtn.voice-pill.snap-back { transform: scale(0.96); }
 
   /* 输入模式：常驻同时显示 */
@@ -436,10 +437,10 @@
   <button id="ttsBtn" onclick="toggleTTS()" title="语音播报：AI回复后自动念出来" class="bar-btn active">🔊</button>
 
   <!-- 语音长条（常驻·默认显示·识别中显示文字；松开直接发送·拉出框外撤回） -->
-  <button id="voiceBtn" class="voice-pill" title="点击说话·再点击发送">
+  <button id="voiceBtn" class="voice-pill" title="按住说话·松开发送">
     <span class="voice-icon">🎙</span>
     <span class="voice-text"></span>
-    <span class="voice-label">点击说话</span>
+    <span class="voice-label">按住说话</span>
   </button>
 
   <!-- 文字输入模式（按 ⌨️ 键切出来） -->
@@ -942,7 +943,7 @@ document.getElementById('chatInput').addEventListener('keydown', (e) => {
   if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend() }
 })
 
-// ========= 语音输入（点击说话·再点击停止发送） =========
+// ========= 语音输入（按住说话·松开发送·拖出撤回） =========
 let voiceRecog = null
 let voiceBaseText = ''
 let voiceInterimShown = ''
@@ -980,15 +981,12 @@ function _pickMime() {
 }
 function startVoice() {
   if (isListening) return
-  const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent)
-  const SR = window.SpeechRecognition || window.webkitSpeechRecognition
-  if (isMobile && SR) {
-    _startVoiceWebkit()
-  } else if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+  if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
     _startVoiceServer()
   } else {
-    showToast('当前浏览器不支持语音输入，请用 Edge/Chrome 桌面版或手动输入')
+    showToast('当前浏览器不支持语音输入，请用 Edge/Chrome 或手动输入')
   }
+}
 }
 function _startVoiceWebkit() {
   try {
@@ -1074,11 +1072,14 @@ async function _startVoiceServer() {
           _sendVoiceResult(voiceBaseText.trim())
         } else if (j && j.error) {
           showToast('本地识别失败：' + (j.detail || j.error))
-          isListening = false; setVoiceBtnState('off')
+          isListening = false; setVoiceBtnState('off'); _updateVoiceDisplay('')
+        } else {
+          showToast('没听清，请再说一次')
+          isListening = false; setVoiceBtnState('off'); _updateVoiceDisplay('')
         }
       } catch (err) {
         showToast('上传识别失败：' + err.message)
-        isListening = false; setVoiceBtnState('off')
+        isListening = false; setVoiceBtnState('off'); _updateVoiceDisplay('')
       }
     }
     mediaRecorder.start()
@@ -1125,15 +1126,52 @@ function stopVoice(opts) {
 
 function bindVoiceButton(btn) {
   if (!btn) return
-  btn.addEventListener('click', function(e) {
-    e.preventDefault()
-    if (isListening) {
-      stopVoice({ cancel: false })
-    } else {
-      startVoice()
-    }
-  })
+  let activePointerId = null
+  const CANCEL_DISTANCE = 60
+
   btn.addEventListener('contextmenu', e => e.preventDefault())
+
+  function _onMove(e) {
+    if (activePointerId !== e.pointerId || !isListening) return
+    const dx = e.clientX - voiceStartX, dy = e.clientY - voiceStartY
+    const dist = Math.sqrt(dx*dx + dy*dy)
+    const shouldCancel = dist > CANCEL_DISTANCE
+    if (shouldCancel !== voiceCanceled) { voiceCanceled = shouldCancel; btn.classList.toggle('will-cancel', shouldCancel) }
+  }
+  function _onUp(e) {
+    if (activePointerId !== e.pointerId) return
+    _cleanup()
+    if (isListening) {
+      btn.classList.add('snap-back')
+      setTimeout(() => btn.classList.remove('snap-back'), 100)
+      stopVoice({ cancel: voiceCanceled })
+    }
+  }
+  function _onCancel(e) {
+    _cleanup()
+    if (isListening) stopVoice({ cancel: voiceCanceled })
+  }
+  function _cleanup() {
+    btn.classList.remove('will-cancel', 'will-send', 'snap-back')
+    document.removeEventListener('pointermove', _onMove)
+    document.removeEventListener('pointerup', _onUp)
+    document.removeEventListener('pointercancel', _onCancel)
+    activePointerId = null
+  }
+
+  btn.addEventListener('pointerdown', function(e) {
+    if (activePointerId !== null) return
+    e.preventDefault()
+    activePointerId = e.pointerId
+    voiceStartX = e.clientX
+    voiceStartY = e.clientY
+    voiceCanceled = false
+    document.addEventListener('pointermove', _onMove)
+    document.addEventListener('pointerup', _onUp)
+    document.addEventListener('pointercancel', _onCancel)
+    startVoice()
+  })
+
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && isListening) stopVoice({ cancel: true }) })
 }
 function bindAllVoiceButtons() {
