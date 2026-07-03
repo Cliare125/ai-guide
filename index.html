@@ -237,15 +237,16 @@
     transition: background 0.15s, transform 0.1s;
     user-select: none;
     -webkit-user-select: none;
-    touch-action: none;
-    position: relative;
-    overflow: hidden;
+    touch-action: manipulation;
   }
   #voiceBtn.voice-pill .voice-icon { font-size: 18px; flex-shrink: 0; transition: transform 0.1s; }
   #voiceBtn.voice-pill .voice-label {
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
     flex: 1; text-align: left;
   }
+  /* 录音中显示"点击停止" */
+  #voiceBtn.voice-pill.listening .voice-label::before { content: '点击停止'; }
+  #voiceBtn.voice-pill.listening .voice-text { display: none !important; }
   #voiceBtn.voice-pill .voice-text {
     flex: 1; min-width: 0; text-align: left; color: #fff;
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
@@ -264,13 +265,8 @@
   #voiceBtn.voice-pill.will-send {
     background: rgba(76,175,80,0.8);
   }
-  /* 拉出去要撤回（橙色提示） */
-  #voiceBtn.voice-pill.will-cancel {
-    background: rgba(255,152,0,0.85);
-    color: #fff;
-  }
-  #voiceBtn.voice-pill.will-cancel .voice-icon { transform: translateX(-3px) scale(1.1); }
-  #voiceBtn.voice-pill.will-cancel .voice-label::after { content: '·松开取消'; opacity: 0.9; margin-left: 4px; }
+  /* 拉出去要撤回（橙色提示）- 已废弃，保留兼容 */
+  #voiceBtn.voice-pill.will-cancel { background: rgba(255,152,0,0.85); color: #fff; }
 
   /* 松手"嗖"一下反馈 */
   #voiceBtn.voice-pill.snap-back { transform: scale(0.96); }
@@ -439,11 +435,11 @@
   <button class="bar-btn" id="autoCapBtn" onclick="toggleAutoCapture()" title="自动截帧：AI回复后自动拍照识别">🔗</button>
   <button class="bar-btn active" id="ttsBtn" onclick="toggleTTS()" title="语音播报：AI回复后自动念出来（不念思考过程）">🔊</button>
 
-  <!-- 语音长条（常驻·默认显示·识别中显示文字；松开直接发送·拉出框外撤回） -->
-  <button id="voiceBtn" class="voice-pill" title="按住说话·松开发送；拉出框外可撤回">
+  <!-- 语音长条（点击开始·再点击停止发送） -->
+  <button id="voiceBtn" class="voice-pill" title="点击说话·再点击发送">
     <span class="voice-icon">🎙</span>
     <span class="voice-text"></span>
-    <span class="voice-label">按住说话</span>
+    <span class="voice-label">点击说话</span>
   </button>
 
   <!-- 文字输入模式（按 ⌨️ 键切出来） -->
@@ -1037,68 +1033,21 @@ function stopVoice(opts) {
   _sendVoiceResult(finalText)
 }
 
-// 按住长条：200ms 后开始说话；松开发送；拖出按钮 60px 视为撤回
+// 点击语音按钮：第一次点击开始录音，第二次点击停止并发送
 function bindVoiceButton(btn) {
   if (!btn) return
-  let activePointerId = null
-  const CANCEL_DISTANCE = 60
-
+  btn.addEventListener('click', function(e) {
+    e.preventDefault()
+    if (isListening) {
+      // 正在录音 → 停止并发送
+      stopVoice({ cancel: false })
+    } else {
+      // 没在录音 → 开始录音
+      startVoice()
+    }
+  })
   // 阻止长按弹菜单
   btn.addEventListener('contextmenu', e => e.preventDefault())
-
-  function _onMove(e) {
-    if (activePointerId !== e.pointerId || !isListening) return
-    const dx = e.clientX - voiceStartX
-    const dy = e.clientY - voiceStartY
-    const dist = Math.sqrt(dx*dx + dy*dy)
-    const shouldCancel = dist > CANCEL_DISTANCE
-    if (shouldCancel !== voiceCanceled) {
-      voiceCanceled = shouldCancel
-      btn.classList.toggle('will-cancel', shouldCancel)
-    }
-  }
-
-  function _onUp(e) {
-    if (activePointerId !== e.pointerId) return
-    _cleanup()
-    if (isListening) {
-      btn.classList.add('snap-back')
-      setTimeout(() => btn.classList.remove('snap-back'), 100)
-      stopVoice({ cancel: voiceCanceled })
-    }
-  }
-
-  // pointercancel = 系统打断（非用户主动取消），按正常松手处理
-  function _onCancel(e) {
-    _cleanup()
-    if (isListening) {
-      stopVoice({ cancel: voiceCanceled })
-    }
-  }
-
-  function _cleanup() {
-    btn.classList.remove('will-cancel', 'will-send', 'snap-back')
-    document.removeEventListener('pointermove', _onMove)
-    document.removeEventListener('pointerup', _onUp)
-    document.removeEventListener('pointercancel', _onCancel)
-    activePointerId = null
-  }
-
-  btn.addEventListener('pointerdown', function(e) {
-    if (activePointerId !== null) return
-    e.preventDefault()
-    activePointerId = e.pointerId
-    voiceStartX = e.clientX
-    voiceStartY = e.clientY
-    voiceCanceled = false
-    // 在 document 上监听 move/up/cancel（不用 setPointerCapture，避免手机触发 pointercancel）
-    document.addEventListener('pointermove', _onMove)
-    document.addEventListener('pointerup', _onUp)
-    document.addEventListener('pointercancel', _onCancel)
-    // 立即开始录音，不用延迟
-    startVoice()
-  })
-
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape' && isListening) stopVoice({ cancel: true })
   })
