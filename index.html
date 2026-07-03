@@ -884,24 +884,39 @@ function _startVoiceWebkit() {
     }
     voiceRecog.onerror = (e) => {
       const code = e && e.error || ''
-      if (code === 'not-allowed' || code === 'service-not-allowed') {
-        showToast('浏览器语音权限不可用，尝试用本地识别…')
-        stopVoice({ cancel: true })
+      // 静默切换：不弹"已取消发送"，直接切到服务器识别
+      if (code === 'not-allowed' || code === 'service-not-allowed' || code === 'network') {
+        showToast('正在切换到本地识别…')
+        _stopWebkitSilent()
         _startVoiceServer()
         return
       }
-      let msg = '语音识别出错：' + code
-      if (code === 'no-speech') msg = '没听到声音，请再试一次'
-      else if (code === 'network') msg = '浏览器语音需联网，已为你切到本地识别…'
-      showToast(msg)
-      if (code === 'network') { stopVoice({ cancel: true }); _startVoiceServer() } else { stopVoice({ cancel: true }) }
+      if (code === 'no-speech') {
+        showToast('没听到声音，请再试一次')
+      } else if (code === 'aborted') {
+        // 正常停止，不提示
+      } else {
+        showToast('语音识别出错：' + code + '，正在切换本地识别…')
+        _stopWebkitSilent()
+        _startVoiceServer()
+      }
     }
     voiceRecog.onend = () => { if (isListening) stopVoice({ cancel: voiceCanceled }) }
     voiceRecog.start()
   } catch (e) {
-    showToast('启动语音识别失败：' + e.message)
-    stopVoice({ cancel: true })
+    showToast('启动语音识别失败，正在切换本地识别…')
+    _startVoiceServer()
   }
+}
+
+// 静默停止 webkit（不弹"已取消发送"，不清空文本）
+function _stopWebkitSilent() {
+  if (voiceRecog) {
+    try { voiceRecog.stop() } catch(e) {}
+    voiceRecog = null
+  }
+  isListening = false
+  setVoiceBtnState('off')
 }
 
 async function _startVoiceServer() {
@@ -1025,21 +1040,11 @@ function stopVoice(opts) {
 // 按住长条：200ms 后开始说话；松开发送；拖出按钮 60px 视为撤回
 function bindVoiceButton(btn) {
   if (!btn) return
-  let pressTimer = null
   let activePointerId = null
   const CANCEL_DISTANCE = 60
 
-  function _onDown(e) {
-    if (activePointerId !== null) return
-    activePointerId = e.pointerId
-    voiceStartX = e.clientX
-    voiceStartY = e.clientY
-    voiceCanceled = false
-    btn.setPointerCapture && btn.setPointerCapture(e.pointerId)
-    pressTimer = setTimeout(() => {
-      startVoice()
-    }, 200)
-  }
+  // 阻止长按弹菜单
+  btn.addEventListener('contextmenu', e => e.preventDefault())
 
   function _onMove(e) {
     if (activePointerId !== e.pointerId || !isListening) return
@@ -1055,10 +1060,7 @@ function bindVoiceButton(btn) {
 
   function _onUp(e) {
     if (activePointerId !== e.pointerId) return
-    if (pressTimer) { clearTimeout(pressTimer); pressTimer = null }
-    btn.classList.remove('will-cancel', 'will-send', 'snap-back')
-    btn.releasePointerCapture && btn.releasePointerCapture(e.pointerId)
-    activePointerId = null
+    _cleanup()
     if (isListening) {
       btn.classList.add('snap-back')
       setTimeout(() => btn.classList.remove('snap-back'), 100)
@@ -1066,17 +1068,37 @@ function bindVoiceButton(btn) {
     }
   }
 
+  // pointercancel = 系统打断（非用户主动取消），按正常松手处理
   function _onCancel(e) {
-    if (pressTimer) { clearTimeout(pressTimer); pressTimer = null }
-    btn.classList.remove('will-cancel', 'will-send', 'snap-back')
-    activePointerId = null
-    if (isListening) stopVoice({ cancel: true })
+    _cleanup()
+    if (isListening) {
+      stopVoice({ cancel: voiceCanceled })
+    }
   }
 
-  btn.addEventListener('pointerdown', _onDown)
-  btn.addEventListener('pointermove', _onMove)
-  btn.addEventListener('pointerup', _onUp)
-  btn.addEventListener('pointercancel', _onCancel)
+  function _cleanup() {
+    btn.classList.remove('will-cancel', 'will-send', 'snap-back')
+    document.removeEventListener('pointermove', _onMove)
+    document.removeEventListener('pointerup', _onUp)
+    document.removeEventListener('pointercancel', _onCancel)
+    activePointerId = null
+  }
+
+  btn.addEventListener('pointerdown', function(e) {
+    if (activePointerId !== null) return
+    e.preventDefault()
+    activePointerId = e.pointerId
+    voiceStartX = e.clientX
+    voiceStartY = e.clientY
+    voiceCanceled = false
+    // 在 document 上监听 move/up/cancel（不用 setPointerCapture，避免手机触发 pointercancel）
+    document.addEventListener('pointermove', _onMove)
+    document.addEventListener('pointerup', _onUp)
+    document.addEventListener('pointercancel', _onCancel)
+    // 立即开始录音，不用延迟
+    startVoice()
+  })
+
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape' && isListening) stopVoice({ cancel: true })
   })
