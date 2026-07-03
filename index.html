@@ -827,9 +827,15 @@ function setVoiceBtnState(state) {
 // 优先用 webkitSpeechRecognition（实时+免费），失败/不支持时降级到 /stt（本地 whisper）
 function startVoice() {
   if (isListening) return
-  // 国内 webkitSpeechRecognition 需要 Google 服务，不可用
-  // 直接用本地 whisper 识别（/stt 端点）
-  if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+  // ★ 手机浏览器自带的语音识别通常可用（用系统引擎，不依赖Google）
+  // 桌面浏览器在国内基本不可用（需要Google服务）
+  const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent)
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition
+  if (isMobile && SR) {
+    // 手机：先试浏览器自带（实时显示、速度快）
+    _startVoiceWebkit()
+  } else if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+    // 桌面：用本地 whisper 识别（/stt 端点）
     _startVoiceServer()
   } else {
     showToast('当前浏览器不支持语音输入，请用 Edge/Chrome 桌面版或手动输入')
@@ -905,7 +911,10 @@ async function _startVoiceServer() {
       try {
         const fd = new FormData()
         fd.append('audio', blob, 'voice.' + (blob.type.split('/')[1] || 'webm'))
-        const r = await fetch('/stt', { method: 'POST', body: fd })
+        const ctrl = new AbortController()
+        const timer = setTimeout(() => ctrl.abort(), 30000)  // 30秒超时
+        const r = await fetch('/stt', { method: 'POST', body: fd, signal: ctrl.signal })
+        clearTimeout(timer)
         const j = await r.json()
         if (j && j.text) {
           voiceBaseText = (voiceBaseText ? voiceBaseText + ' ' : '') + j.text.trim()
@@ -1214,6 +1223,23 @@ async function uploadFileToCoze(dataUrl, filename, contentType) {
 
 // ========= 语音播报（AI 回复 → Edge TTS 念出来） =========
 let ttsEnabled = true  // 默认开启
+let _audioUnlocked = false  // 手机音频解锁标记
+
+// ★ 手机音频解锁：首次用户交互时播放一段静音，解锁 audio.play()
+function _unlockAudio() {
+  if (_audioUnlocked) return
+  try {
+    const ctx = new (window.AudioContext || window.webkitAudioContext)()
+    const src = ctx.createBufferSource()
+    src.connect(ctx.destination)
+    src.start(0)
+    _audioUnlocked = true
+    console.log('[Audio] 已解锁音频播放')
+  } catch(e) {}
+}
+// 页面加载后监听首次交互
+document.addEventListener('pointerdown', _unlockAudio, { once: true })
+document.addEventListener('keydown', _unlockAudio, { once: true })
 let currentAudio = null  // 当前播放的 audio 元素
 
 // 清洗 Markdown / 代码符号，让 TTS 念得更自然
@@ -1258,29 +1284,59 @@ async function speakText(text) {
     try { currentAudio.pause() } catch(e) {}
     currentAudio = null
   }
-  // 调 server.py 的 /tts 代理（Edge TTS，免费免 key）
+  // 如果 speechSynthesis 正在播，停掉
+  if (window.speechSynthesis) {
+    try { window.speechSynthesis.cancel() } catch(e) {}
+  }
+  // 先尝试用服务器 Edge TTS
   try {
     const resp = await fetch('/tts', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ text: cleanText, voice: 'zh-CN-XiaoxiaoNeural' })
     })
-    if (!resp.ok) {
-      console.warn('[TTS] 代理返回错误:', resp.status)
-      return
+    if (resp.ok) {
+      const blob = await resp.blob()
+      const url = URL.createObjectURL(blob)
+      const audio = new Audio(url)
+      currentAudio = audio
+      audio.onended = () => { URL.revokeObjectURL(url); currentAudio = null }
+      audio.onerror = () => { URL.revokeObjectURL(url); currentAudio = null }
+      await audio.play().catch(e => {
+        console.warn('[TTS] 服务器音频播放失败，尝试浏览器内置语音…', e.message)
+        URL.revokeObjectURL(url)
+        _speakBrowserTTS(cleanText)
+      })
+    } else {
+      console.warn('[TTS] 服务器返回错误:', resp.status, '，尝试浏览器内置语音…')
+      _speakBrowserTTS(cleanText)
     }
-    const blob = await resp.blob()
-    const url = URL.createObjectURL(blob)
-    const audio = new Audio(url)
-    currentAudio = audio
-    audio.onended = () => { URL.revokeObjectURL(url); currentAudio = null }
-    audio.onerror = () => { URL.revokeObjectURL(url); currentAudio = null }
-    await audio.play().catch(e => {
-      console.warn('[TTS] 自动播放失败（需用户先交互）:', e.message)
-      URL.revokeObjectURL(url)
-    })
   } catch (e) {
-    console.warn('[TTS] 失败:', e.message)
+    console.warn('[TTS] 服务器TTS失败，尝试浏览器内置语音…', e.message)
+    _speakBrowserTTS(cleanText)
+  }
+}
+
+// ★ 浏览器内置语音合成（手机/桌面都支持，不需要服务器）
+function _speakBrowserTTS(text) {
+  if (!window.speechSynthesis) {
+    console.warn('[TTS] 浏览器不支持语音合成')
+    return
+  }
+  try {
+    window.speechSynthesis.cancel()
+    const u = new SpeechSynthesisUtterance(text)
+    u.lang = 'zh-CN'
+    u.rate = 1.0
+    u.pitch = 1.0
+    // 尝试找中文语音
+    const voices = window.speechSynthesis.getVoices()
+    const zhVoice = voices.find(v => v.lang.startsWith('zh'))
+    if (zhVoice) u.voice = zhVoice
+    window.speechSynthesis.speak(u)
+    console.log('[TTS] 使用浏览器内置语音播放')
+  } catch(e) {
+    console.warn('[TTS] 浏览器语音也不可用:', e.message)
   }
 }
 
