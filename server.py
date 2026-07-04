@@ -8,11 +8,15 @@ Coze API 代理服务器
 - 支持 Edge TTS 代理（POST /tts 文本 → 音频流）
 """
 
-# 国内本地环境：用 HuggingFace 镜像下载 whisper 模型
-# Railway（海外服务器）不用镜像，直接用 huggingface.co
+# 云端环境（Railway / Hugging Face Spaces）不设 HF 镜像，直接用 huggingface.co
+# HF Spaces 设置 SPACE_ID 环境变量
 import os
-_is_railway = bool(os.environ.get('RAILWAY_ENVIRONMENT') or os.environ.get('PORT', '').startswith('80'))
-if not _is_railway:
+_is_cloud = bool(
+    os.environ.get('RAILWAY_ENVIRONMENT') or
+    os.environ.get('SPACE_ID') or
+    os.environ.get('RENDER')
+)
+if not _is_cloud:
     os.environ.setdefault('HF_ENDPOINT', 'https://hf-mirror.com')
     os.environ.setdefault('HF_HUB_DISABLE_XET', '1')
 os.environ.setdefault('HF_HUB_DISABLE_SYMLINKS_WARNING', '1')

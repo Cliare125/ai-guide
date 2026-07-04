@@ -1,0 +1,13 @@
+__pycache__/
+*.pyc
+*.pyo
+.git/
+.gitignore
+.workbuddy/
+*.bat
+*.vbs
+*.exe
+部署说明.txt
+render.yaml
+nul
+test_audio.wav
