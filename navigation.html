@@ -981,16 +981,12 @@ function _pickMime() {
 }
 function startVoice() {
   if (isListening) return
-  const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent)
-  const SR = window.SpeechRecognition || window.webkitSpeechRecognition
-  if (isMobile && SR) {
-    _startVoiceWebkit()
-  } else if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+  // 直接用服务器 whisper 识别，跳过 webkit（国内不可用/手机秒报错）
+  if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
     _startVoiceServer()
   } else {
     showToast('当前浏览器不支持语音输入，请用 Edge/Chrome 或手动输入')
   }
-}
 }
 function _startVoiceWebkit() {
   let webkitSwitched = false
@@ -1059,10 +1055,19 @@ function _stopWebkitSilent() {
   setVoiceBtnState('off')
 }
 async function _startVoiceServer() {
+  _voiceWaiting = true
+  _voiceWantStop = false
   try {
-    // 权限已预先获取时，getUserMedia 会瞬间返回不弹框
     mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true })
+    _voiceWaiting = false
     _micPermissionGranted = true
+    if (_voiceWantStop) {
+      _voiceWantStop = false
+      mediaStream.getTracks().forEach(t => t.stop())
+      mediaStream = null
+      isListening = false; setVoiceBtnState('off')
+      return
+    }
     mediaChunks = []
     mediaRecorder = new MediaRecorder(mediaStream, { mimeType: _pickMime() })
     mediaRecorder.ondataavailable = (e) => { if (e.data && e.data.size) mediaChunks.push(e.data) }
@@ -1103,6 +1108,7 @@ async function _startVoiceServer() {
     isListening = true
     setVoiceBtnState('on')
   } catch (e) {
+    _voiceWaiting = false
     showToast('无法访问麦克风：' + e.message)
     isListening = false; setVoiceBtnState('off')
   }
@@ -1155,6 +1161,10 @@ function bindVoiceButton(btn) {
   function _onUp(e) {
     if (activePointerId !== e.pointerId) return
     _cleanup()
+    if (_voiceWaiting) {
+      _voiceWantStop = true
+      return
+    }
     if (isListening) {
       btn.classList.add('snap-back')
       setTimeout(() => btn.classList.remove('snap-back'), 100)
@@ -1313,20 +1323,8 @@ document.addEventListener('DOMContentLoaded', () => {
 let ttsEnabled = true
 let currentAudio = null
 let _micPermissionGranted = false  // 麦克风权限是否已获取
-
-// ★ 预热麦克风权限：首次用户交互时悄悄获取权限，之后按按钮不再弹框
-function _preWarmMic() {
-  if (_micPermissionGranted) return
-  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) return
-  navigator.mediaDevices.getUserMedia({ audio: true }).then(stream => {
-    stream.getTracks().forEach(t => t.stop())
-    _micPermissionGranted = true
-    console.log('[Mic] 麦克风权限已预先获取')
-  }).catch(() => {})
-}
-// 页面加载后首次交互时预热麦克风权限
-document.addEventListener('pointerdown', _preWarmMic, { once: true })
-document.addEventListener('keydown', _preWarmMic, { once: true })
+let _voiceWaiting = false  // getUserMedia 正在等待（权限弹窗）
+let _voiceWantStop = false  // 用户在等待期间松开了按钮
 
 // 清洗 Markdown / 代码符号，让 TTS 念得更自然
 function cleanTextForTTS(text) {

@@ -451,9 +451,14 @@ if __name__ == '__main__':
         except ImportError:
             raise ImportError('请运行: pip install faster-whisper')
         if _whisper_model is None:
-            # 第一次调用：加载模型（int8 精度，省内存）
-            # tiny 模型 ~75MB，首次下载快；准确度够用
-            _whisper_model = WhisperModel('tiny', device='cpu', compute_type='int8')
+            # 优先从本地目录加载模型（避免 Railway 下载失败）
+            _local_model = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'models', 'faster-whisper-tiny')
+            if os.path.isdir(_local_model) and os.path.isfile(os.path.join(_local_model, 'model.bin')):
+                print(f'[STT] 从本地加载 whisper tiny 模型: {_local_model}', flush=True)
+                _whisper_model = WhisperModel(_local_model, device='cpu', compute_type='int8')
+            else:
+                print('[STT] 本地模型未找到，尝试在线下载 tiny 模型…', flush=True)
+                _whisper_model = WhisperModel('tiny', device='cpu', compute_type='int8')
         segments, info = _whisper_model.transcribe(audio_path, language=lang, beam_size=5)
         text = ''.join(seg.text for seg in segments).strip()
         return text

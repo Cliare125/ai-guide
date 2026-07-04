@@ -842,16 +842,10 @@ function setVoiceBtnState(state) {
   if (btn) btn.classList.toggle('listening', state === 'on')
 }
 
-// 手机优先用浏览器内置语音识别（HTTPS下可用），桌面直接用 whisper
+// 直接用服务器 whisper 识别，跳过 webkit（国内不可用/手机秒报错）
 function startVoice() {
   if (isListening) return
-  const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent)
-  const SR = window.SpeechRecognition || window.webkitSpeechRecognition
-  if (isMobile && SR) {
-    // 手机：先用浏览器自带语音识别（实时、快速、免费）
-    _startVoiceWebkit()
-  } else if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
-    // 桌面：用本地 whisper 识别
+  if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
     _startVoiceServer()
   } else {
     showToast('当前浏览器不支持语音输入，请用 Edge/Chrome 或手动输入')
@@ -928,10 +922,21 @@ function _stopWebkitSilent() {
 }
 
 async function _startVoiceServer() {
+  _voiceWaiting = true
+  _voiceWantStop = false
   try {
-    // 权限已预先获取时，getUserMedia 会瞬间返回不弹框
     mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true })
+    _voiceWaiting = false
     _micPermissionGranted = true
+    // 用户在等待权限弹窗时松开了按钮 → 静默取消
+    if (_voiceWantStop) {
+      _voiceWantStop = false
+      mediaStream.getTracks().forEach(t => t.stop())
+      mediaStream = null
+      isListening = false
+      setVoiceBtnState('off')
+      return
+    }
     mediaChunks = []
     mediaRecorder = new MediaRecorder(mediaStream, { mimeType: _pickMime() })
     mediaRecorder.ondataavailable = (e) => { if (e.data && e.data.size) mediaChunks.push(e.data) }
@@ -989,6 +994,7 @@ async function _startVoiceServer() {
     isListening = true
     setVoiceBtnState('on')
   } catch (e) {
+    _voiceWaiting = false
     showToast('无法访问麦克风：' + e.message)
     isListening = false
     setVoiceBtnState('off')
@@ -1078,6 +1084,11 @@ function bindVoiceButton(btn) {
   function _onUp(e) {
     if (activePointerId !== e.pointerId) return
     _cleanup()
+    // 如果 getUserMedia 还在等待（权限弹窗），标记待停止
+    if (_voiceWaiting) {
+      _voiceWantStop = true
+      return
+    }
     if (isListening) {
       btn.classList.add('snap-back')
       setTimeout(() => btn.classList.remove('snap-back'), 100)
@@ -1279,20 +1290,8 @@ async function uploadFileToCoze(dataUrl, filename, contentType) {
 let ttsEnabled = true  // 默认开启
 let _audioUnlocked = false  // 手机音频解锁标记
 let _micPermissionGranted = false  // 麦克风权限是否已获取
-
-// ★ 预热麦克风权限：首次用户交互时悄悄获取权限，之后按按钮不再弹框
-function _preWarmMic() {
-  if (_micPermissionGranted) return
-  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) return
-  navigator.mediaDevices.getUserMedia({ audio: true }).then(stream => {
-    // 拿到权限后立即释放，不占用麦克风
-    stream.getTracks().forEach(t => t.stop())
-    _micPermissionGranted = true
-    console.log('[Mic] 麦克风权限已预先获取')
-  }).catch(() => {
-    // 用户拒绝或浏览器不支持，不影响正常使用
-  })
-}
+let _voiceWaiting = false  // getUserMedia 正在等待（权限弹窗）
+let _voiceWantStop = false  // 用户在等待期间松开了按钮
 
 // ★ 手机音频解锁：首次用户交互时播放一段静音，解锁 audio.play()
 function _unlockAudio() {
@@ -1305,8 +1304,6 @@ function _unlockAudio() {
     _audioUnlocked = true
     console.log('[Audio] 已解锁音频播放')
   } catch(e) {}
-  // 同时预热麦克风权限
-  _preWarmMic()
 }
 // 页面加载后监听首次交互
 document.addEventListener('pointerdown', _unlockAudio, { once: true })
