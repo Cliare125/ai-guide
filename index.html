@@ -929,7 +929,9 @@ function _stopWebkitSilent() {
 
 async function _startVoiceServer() {
   try {
+    // 权限已预先获取时，getUserMedia 会瞬间返回不弹框
     mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true })
+    _micPermissionGranted = true
     mediaChunks = []
     mediaRecorder = new MediaRecorder(mediaStream, { mimeType: _pickMime() })
     mediaRecorder.ondataavailable = (e) => { if (e.data && e.data.size) mediaChunks.push(e.data) }
@@ -1276,6 +1278,21 @@ async function uploadFileToCoze(dataUrl, filename, contentType) {
 // ========= 语音播报（AI 回复 → Edge TTS 念出来） =========
 let ttsEnabled = true  // 默认开启
 let _audioUnlocked = false  // 手机音频解锁标记
+let _micPermissionGranted = false  // 麦克风权限是否已获取
+
+// ★ 预热麦克风权限：首次用户交互时悄悄获取权限，之后按按钮不再弹框
+function _preWarmMic() {
+  if (_micPermissionGranted) return
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) return
+  navigator.mediaDevices.getUserMedia({ audio: true }).then(stream => {
+    // 拿到权限后立即释放，不占用麦克风
+    stream.getTracks().forEach(t => t.stop())
+    _micPermissionGranted = true
+    console.log('[Mic] 麦克风权限已预先获取')
+  }).catch(() => {
+    // 用户拒绝或浏览器不支持，不影响正常使用
+  })
+}
 
 // ★ 手机音频解锁：首次用户交互时播放一段静音，解锁 audio.play()
 function _unlockAudio() {
@@ -1288,6 +1305,8 @@ function _unlockAudio() {
     _audioUnlocked = true
     console.log('[Audio] 已解锁音频播放')
   } catch(e) {}
+  // 同时预热麦克风权限
+  _preWarmMic()
 }
 // 页面加载后监听首次交互
 document.addEventListener('pointerdown', _unlockAudio, { once: true })

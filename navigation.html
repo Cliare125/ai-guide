@@ -1060,7 +1060,9 @@ function _stopWebkitSilent() {
 }
 async function _startVoiceServer() {
   try {
+    // 权限已预先获取时，getUserMedia 会瞬间返回不弹框
     mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true })
+    _micPermissionGranted = true
     mediaChunks = []
     mediaRecorder = new MediaRecorder(mediaStream, { mimeType: _pickMime() })
     mediaRecorder.ondataavailable = (e) => { if (e.data && e.data.size) mediaChunks.push(e.data) }
@@ -1310,6 +1312,21 @@ document.addEventListener('DOMContentLoaded', () => {
 // ========= 语音播报（Edge TTS 走 server.py 代理） =========
 let ttsEnabled = true
 let currentAudio = null
+let _micPermissionGranted = false  // 麦克风权限是否已获取
+
+// ★ 预热麦克风权限：首次用户交互时悄悄获取权限，之后按按钮不再弹框
+function _preWarmMic() {
+  if (_micPermissionGranted) return
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) return
+  navigator.mediaDevices.getUserMedia({ audio: true }).then(stream => {
+    stream.getTracks().forEach(t => t.stop())
+    _micPermissionGranted = true
+    console.log('[Mic] 麦克风权限已预先获取')
+  }).catch(() => {})
+}
+// 页面加载后首次交互时预热麦克风权限
+document.addEventListener('pointerdown', _preWarmMic, { once: true })
+document.addEventListener('keydown', _preWarmMic, { once: true })
 
 // 清洗 Markdown / 代码符号，让 TTS 念得更自然
 function cleanTextForTTS(text) {
